@@ -505,13 +505,14 @@ and used when constructing these
             )
 
         # Declare design parameters and variables
-        self.kf = Param(
+        self.kf = Var(
             self.adsorbed_components,
             initialize=0.4,
-            mutable=True,
             units=1 / pyunits.s,
+            bounds=(1e-5,1),
             doc="mass transfer parameter for linear driving force model",
         )
+        self.kf.fix()
 
         self.heat_transfer_coeff_gas_wall = Param(
             initialize=35.5,
@@ -1417,13 +1418,19 @@ and used when constructing these
         # Area of gas side, and solid side
         @self.Constraint(self.flowsheet().time, self.length_domain, doc="Gas side area")
         def gas_phase_area_constraint(b, t, x):
-            return b.gas_phase.area[t, x] == b.bed_area * (
-                b.voidage + (1.0 - b.voidage) * b.particle_voidage
-            )
+            return b.gas_phase.area[t, x] == b.bed_area * b.voidage
+
+        @self.Expression(doc="Particle density (kg/m^3 particle)")
+        def particle_dens(b):
+            return b.dens_mass_particle_param * (1.0 - b.particle_voidage)
+        
+        @self.Expression(doc="Bulk density (kg/m^3 bed)")
+        def bulk_dens(b):
+            return b.particle_dens * (1.0 - b.voidage)
 
         @self.Expression(doc="Solid phase area")
         def solid_phase_area(b):
-            return b.bed_area * (1.0 - b.voidage) * (1.0 - b.particle_voidage)
+            return b.bed_area * (1.0 - b.voidage)
 
         @self.Constraint(
             self.flowsheet().time,
@@ -1687,7 +1694,7 @@ and used when constructing these
                         - b.adsorbate_loading[t, x, j]
                     )
                     * b.solid_phase_area
-                    * b.dens_mass_particle_param
+                    * b.particle_dens
                 )
             else:
                 return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == 0.0
@@ -1903,7 +1910,7 @@ and used when constructing these
         def adsorbate_holdup_eqn(b, t, x, j):
             return b.adsorbate_holdup[t, x, j] == (
                 b.solid_phase_area
-                * b.dens_mass_particle_param
+                * b.particle_dens
                 * b.adsorbate_loading[t, x, j]
             )
 
@@ -1933,7 +1940,7 @@ and used when constructing these
             def solid_energy_holdup_active_eqn(b, t, x):
                 return b.solid_energy_holdup_active[t, x] == (
                     b.solid_phase_area
-                    * b.dens_mass_particle_param
+                    * b.particle_dens
                     * b.cp_mass_param
                     * b.mass_frac_active
                     * (b.solid_temperature_active[t, x] - b.temperature_ref)
@@ -1957,7 +1964,7 @@ and used when constructing these
             def solid_energy_holdup_eqn(b, t, x):
                 return b.solid_energy_holdup[t, x] == (
                     b.solid_phase_area
-                    * b.dens_mass_particle_param
+                    * b.particle_dens
                     * b.cp_mass_param
                     * (1 - b.mass_frac_active)
                     * (b.solid_temperature[t, x] - b.temperature_ref)
@@ -1974,7 +1981,7 @@ and used when constructing these
                     == b.htc_between_solid_phases
                     * (b.solid_temperature_active[t, x] - b.solid_temperature[t, x])
                     * b.solid_phase_area
-                    * b.dens_mass_particle_param
+                    * b.particle_dens
                 )
 
             @self.Constraint(
@@ -2035,7 +2042,7 @@ and used when constructing these
             def solid_energy_holdup_eqn(b, t, x):
                 return b.solid_energy_holdup[t, x] == (
                     b.solid_phase_area
-                    * b.dens_mass_particle_param
+                    * b.particle_dens
                     * b.cp_mass_param
                     * (b.solid_temperature[t, x] - b.temperature_ref)
                     + sum(
