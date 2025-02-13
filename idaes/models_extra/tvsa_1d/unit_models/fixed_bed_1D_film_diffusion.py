@@ -1544,6 +1544,84 @@ and used when constructing these
                         " developers with this bug.".format(self.name)
                     )
 
+        # add isotherm equations/constraints
+        # add extra equations for log transformation of Lewatit mechanistic model
+        if self.config.adsorbent == "Lewatit" and self.config.coadsorption_isotherm == "Mechanistic":
+            if self.config.coadsorption_isotherm == "Mechanistic": #create additional terms for transformed mechanistic model
+                self.ln_qtoth = Var(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    initialize=1,
+                    bounds=(None, 3),
+                    doc="natural log of qdry for mechanistic isotherm model",
+                    units=None,
+                )
+                self.A_iso = Var(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    initialize=1,
+                    bounds=(None, None),
+                    doc="term for log transformed mechanistic isotherm model",
+                    units=None,
+                )
+
+                @self.Expression(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    doc="tau for mechansitic lewatit model"
+                )
+                def tau(b,t,x):
+                    if self.config.has_microwave_heating:
+                        T = b.solid_temperature_active[t, x]
+                    else:
+                        T = b.solid_temperature[t, x]
+                    return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
+                
+                @self.Expression(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    self.adsorbed_components,
+                    doc="component partial pressure used in isotherm equations"
+                )
+                def pres(b,t,x,j):
+                    return b.gas_phase.properties[t, x].pressure * b.mole_frac_comp_surface[t, x, j]
+                
+                @self.Expression(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    doc="term in log transformed mechanistic isotherm equation, ln(b*p)"
+                )
+                def ln_b_p(b,t,x):
+                    if self.config.has_microwave_heating:
+                        T = b.solid_temperature_active[t, x]
+                    else:
+                        T = b.solid_temperature[t, x]
+                    exp_term = exp(-b.MECH_A / b.adsorbate_loading_equil[t, x, "H2O"])
+                    hoa_ave = (1 - exp_term) * b.hoa + exp_term * b.MECH_hoa_wet
+                    #smooth max of (pmin,pres)
+                    eps = 1e-8
+                    pmin = 1e-10
+                    pres_smooth_max = 0.5 * (b.pres[t,x,"CO2"] + pmin + ((b.pres[t,x,"CO2"]-pmin) ** 2 + (eps * pyunits.Pa) ** 2) ** 0.5)
+                    return log(b.b0) + (-hoa_ave / constants.gas_constant / T) + log(pres_smooth_max) 
+                
+                @self.Constraint(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    doc="""constraint for log transformed mechanistic isotherm model"""
+                )
+                def A_iso_eq(b,t,x):
+                    return exp(b.A_iso[t,x])/(1 + exp(b.tau[t,x]*b.ln_b_p[t,x])) == 1
+                    
+                @self.Constraint(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    doc="""constraint for log transformed mechanistic isotherm model"""
+                )
+                def ln_qtoth_eq(b,t,x): 
+                    return b.tau[t,x]*b.ln_qtoth[t,x] == b.tau[t,x]*log(self.q0_inf) + b.tau[t,x]*b.ln_b_p[t,x] - b.A_iso[t,x]
+                    # or, if you remove A_iso
+                    # return b.tau[t,x]*b.ln_qdry[t,x] == b.tau[t,x]*log(self.q0_inf) + b.tau[t,x]*b.ln_b_p[t,x] - log(1+exp(b.tau[t,x]*b.ln_b_p[t,x]))
+
         @self.Constraint(
             self.flowsheet().time,
             self.length_domain,
@@ -1593,21 +1671,7 @@ and used when constructing these
                                 self.MECH_phi_dry
                                 + (phi_avialable - self.MECH_phi_dry) * exp_term
                             )
-                            hoa_ave = (
-                                1 - exp_term
-                            ) * self.hoa + exp_term * self.MECH_hoa_wet
-                            b_ = self.b0 * exp(-hoa_ave / constants.gas_constant / T)
-                            b_p = b_ * pres[j]
-                            tau = self.tau0 + self.alpha * (
-                                1 - self.temperature_ref / T
-                            )
-                            return b.adsorbate_loading_equil[
-                                t, x, j
-                            ] * self.MECH_phi_dry == self.q0_inf * b_p * phi / (
-                                1 + b_p**tau
-                            ) ** (
-                                1 / tau
-                            )
+                            return b.adsorbate_loading_equil[t, x, j] * self.MECH_phi_dry == phi*exp(b.ln_qtoth[t,x])
                         elif self.config.coadsorption_isotherm == "WADST":
                             b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
                             b_p = b_ * pres[j]
