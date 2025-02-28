@@ -310,6 +310,20 @@ moving-bed reactors.}""",
     )
 
     CONFIG.declare(
+        "MTC_type",
+        ConfigValue(
+            default="Fixed",
+            domain=In(["Fixed","Macropore"]),
+            description="type of MTC equation to use",
+            doc="""Construction flag for the type of mass transfer coefficient equation 
+            to use. "Fixed" is a single fixed value and "Macropore uses an equation relating
+            sorbent properties and effective diffusion to the MTC.
+            Default: "Fixed".
+            Valide values: "None", "Macropore"."""
+        )
+    )
+
+    CONFIG.declare(
         "property_package",
         ConfigValue(
             default=None,
@@ -506,14 +520,23 @@ and used when constructing these
             )
 
         # Declare design parameters and variables
-        self.kf = Var(
-            self.adsorbed_components,
-            initialize=0.4,
-            units=1 / pyunits.s,
-            bounds=(1e-5,1),
-            doc="mass transfer parameter for linear driving force model",
-        )
-        self.kf.fix()
+        if self.config.MTC_type == "Fixed":
+            self.kf = Var(
+                self.adsorbed_components,
+                initialize=0.4,
+                units=1 / pyunits.s,
+                bounds=(1e-5,1),
+                doc="mass transfer parameter for linear driving force model",
+            )
+            self.kf.fix()
+        elif self.config.MTC_type == "Macropore":
+            self.C1 = Var(
+                self.adsorbed_components,
+                initialize=1.68e-12,
+                units=pyunits.m**2*pyunits.K**-0.5*pyunits.seconds**-1,
+                bounds=(1e-13,1e-10),
+                doc="lumped parameter for macropore MTC calculation"
+            )
 
         self.heat_transfer_coeff_gas_wall = Param(
             initialize=35.5,
@@ -1785,9 +1808,9 @@ and used when constructing these
                                 + exp(-self.WADST_A / q_h2o) * q_wet
                             )
                         elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
-                            return b.adsorbate_loading_equil[
+                            return 10*b.adsorbate_loading_equil[
                                 t, x, j
-                            ] == exp(b.ln_qtoth[t,x])
+                            ] == 10*exp(b.ln_qtoth[t,x])
                         else:  # invalid configuration
                             raise BurntToast(
                                 "{} encountered unrecognized argument for "
@@ -1819,6 +1842,21 @@ and used when constructing these
                 Constraint.Skip
 
         # Mass transfer term due to adsorption
+        if self.config.MTC_type == "Macropore":
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                self.adsorbed_components,
+                doc="""expression for calculating internal mass transfer coefficient"""
+            )
+            def kf(b,t,x,j):
+                if self.config.has_microwave_heating:
+                    T = b.solid_temperature_active[t, x]
+                else:
+                    T = b.solid_temperature[t, x]
+                Deff = b.C1[j]*T**0.5
+                return 15*b.particle_voidage*Deff/(b.particle_dia/2)**2
+
         @self.Constraint(
             self.flowsheet().time,
             self.length_domain,
@@ -1828,8 +1866,12 @@ and used when constructing these
         )
         def mass_transfer_eqn(b, t, x, j):
             if j in b.adsorbed_components:
+                if self.config.MTC_type == "Fixed":
+                    kf = b.kf[j]
+                elif self.config.MTC_type == "Macropore":
+                    kf = b.kf[t,x,j]
                 return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == -(
-                    b.kf[j]
+                    kf
                     * (
                         b.adsorbate_loading_equil[t, x, j]
                         - b.adsorbate_loading[t, x, j]
