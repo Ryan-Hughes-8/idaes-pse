@@ -1268,6 +1268,7 @@ and used when constructing these
         self.bed_area = Var(
             domain=Reals,
             initialize=1,
+            bounds=(1e-20,None),
             doc="Reactor cross-sectional area",
             units=pyunits.m**2,
         )
@@ -1278,6 +1279,7 @@ and used when constructing these
             self.length_domain,
             domain=Reals,
             initialize=0.05,
+            bounds = (1e-20,10),
             doc="Gas superficial velocity",
             units=pyunits.m / pyunits.s,
         )
@@ -1289,6 +1291,7 @@ and used when constructing these
             self.adsorbed_components,
             domain=Reals,
             initialize=1.0,
+            bounds=(1e-20,None),
             doc="Schmidt number",
             units=pyunits.dimensionless,
         )
@@ -1298,43 +1301,48 @@ and used when constructing these
             self.length_domain,
             domain=Reals,
             initialize=100.0,
+            bounds=(1e-20,None),
             doc="Reynolds number",
             units=pyunits.dimensionless,
         )
 
-        self.Nu_number = Var(
-            self.flowsheet().time,
-            self.length_domain,
-            domain=Reals,
-            initialize=10.0,
-            doc="Nusselt number",
-            units=pyunits.dimensionless,
-        )
+        # self.Nu_number = Var(
+        #     self.flowsheet().time,
+        #     self.length_domain,
+        #     domain=Reals,
+        #     initialize=10.0,
+        #     bounds=(1e-20,None),
+        #     doc="Nusselt number",
+        #     units=pyunits.dimensionless,
+        # )
 
-        self.Sh_number = Var(
-            self.flowsheet().time,
-            self.length_domain,
-            self.adsorbed_components,
-            domain=Reals,
-            initialize=10.0,
-            doc="Sherwood number",
-            units=pyunits.dimensionless,
-        )
+        # self.Sh_number = Var(
+        #     self.flowsheet().time,
+        #     self.length_domain,
+        #     self.adsorbed_components,
+        #     domain=Reals,
+        #     initialize=10.0,
+        #     bounds=(1e-20,None),
+        #     doc="Sherwood number",
+        #     units=pyunits.dimensionless,
+        # )
         # Note: Pr number is a property of gas phase
 
-        self.RH = Var(
-            self.flowsheet().time,
-            self.length_domain,
-            initialize=0.1,
-            doc="Relative humidity",
-            units=pyunits.dimensionless,
-        )
+        # self.RH = Var(
+        #     self.flowsheet().time,
+        #     self.length_domain,
+        #     initialize=0.1,
+        #     bounds=(-1e-3,1.001),
+        #     doc="Relative humidity",
+        #     units=pyunits.dimensionless,
+        # )
 
         self.gas_solid_htc = Var(
             self.flowsheet().time,
             self.length_domain,
             domain=Reals,
             initialize=1.0,
+            bounds=(1e-20,None),
             doc="Gas-solid heat transfer coefficient",
             units=pyunits.m / pyunits.s / pyunits.K / pyunits.m**2,
         )
@@ -1345,6 +1353,7 @@ and used when constructing these
             self.adsorbed_components,
             domain=Reals,
             initialize=1.0,
+            bounds=(1e-20,None),
             doc="film diffusion mass transfer coefficient",
             units=pyunits.m / pyunits.s,
         )
@@ -1355,6 +1364,7 @@ and used when constructing these
             self.adsorbed_components,
             domain=Reals,
             initialize=0.1,
+            bounds=(-1e-3,1.001),
             doc="mole fraction of adsorbed species at sorbent external surface",
             units=pyunits.dimensionless,
         )
@@ -1373,6 +1383,7 @@ and used when constructing these
             self.length_domain,
             domain=Reals,
             initialize=300,
+            bounds=(10+273.15,75+273.15),
             doc="Solid phase temperature",
             units=pyunits.K,
         )
@@ -1382,6 +1393,7 @@ and used when constructing these
             self.length_domain,
             self.adsorbed_components,
             domain=Reals,
+            bounds=(-1e-3,15),
             initialize=1.0,
             doc="Loading of adsorbed species",
             units=pyunits.mol / pyunits.kg,
@@ -1392,7 +1404,7 @@ and used when constructing these
             self.length_domain,
             self.adsorbed_components,
             domain=Reals,
-            bounds=(None,None),
+            bounds=(-1e-3,15),
             initialize=1.0,
             doc="Loading of adsorbed species if in equilibrium",
             units=pyunits.mol / pyunits.kg,
@@ -1403,7 +1415,7 @@ and used when constructing these
             self.length_domain,
             self.adsorbed_components,
             domain=Reals,
-            bounds=(None,None),
+            bounds=(-1e-3,None),
             initialize=1.0,
             doc="Adsorbate holdup per unit length",
             units=pyunits.mol / pyunits.m,
@@ -1476,12 +1488,12 @@ and used when constructing these
         def solid_phase_area(b):
             return b.bed_area * (1.0 - b.voidage)
 
-        @self.Constraint(
+        @self.Expression(
             self.flowsheet().time,
             self.length_domain,
             doc="relative humidity constraint",
         )
-        def relative_humidity_eqn(b, t, x):
+        def RH(b, t, x):
             # Use gas phase temperature instead of solid temperature seems help the convergence
             # Use solid tempreature may cause condensation at the begining of desorption
             T = b.gas_phase.properties[t, x].temperature
@@ -1497,12 +1509,7 @@ and used when constructing these
                 - 12000607.575006244704127
             ) * pyunits.Pa
             # use mole fraction at external surface
-            return (
-                b.RH[t, x] * p_vap * 1e-3
-                == 1e-3
-                * b.mole_frac_comp_surface[t, x, "H2O"]
-                * b.gas_phase.properties[t, x].pressure
-            )
+            return ( b.mole_frac_comp_surface[t, x, "H2O"] * b.gas_phase.properties[t, x].pressure/p_vap )
 
         # ---------------------------------------------------------------------
         # Hydrodynamic constraints
@@ -1595,8 +1602,8 @@ and used when constructing these
                 self.ln_qtoth = Var(
                     self.flowsheet().time,
                     self.length_domain,
-                    initialize=1,
-                    bounds=(None, 3),
+                    initialize=0,
+                    bounds=(-20, 3),
                     doc="natural log of qdry for mechanistic isotherm model",
                     units=None,
                 )
@@ -1661,7 +1668,7 @@ and used when constructing these
                     self.length_domain,
                     doc="""constraint for log transformed mechanistic isotherm model"""
                 )
-                def ln_qtoth_eq(b,t,x): 
+                def ln_qtoth_eq(b,t,x):
                     # return b.tau[t,x]*b.ln_qtoth[t,x] == b.tau[t,x]*log(self.q0_inf) + b.tau[t,x]*b.ln_b_p[t,x] - b.A_iso[t,x]
                     # or, if you remove A_iso
                     return b.tau[t,x]*b.ln_qtoth[t,x] == b.tau[t,x]*log(self.q0_inf) + b.tau[t,x]*b.ln_b_p[t,x] - log(1+exp(b.tau[t,x]*b.ln_b_p[t,x]))
@@ -1669,8 +1676,8 @@ and used when constructing these
                 self.ln_qtoth = Var(
                     self.flowsheet().time,
                     self.length_domain,
-                    initialize=1,
-                    bounds=(None, 3),
+                    initialize=0,
+                    bounds=(-20, 3),
                     doc="natural log of qdry for mechanistic isotherm model",
                     units=None,
                 )
@@ -1808,9 +1815,9 @@ and used when constructing these
                                 + exp(-self.WADST_A / q_h2o) * q_wet
                             )
                         elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
-                            return 10*b.adsorbate_loading_equil[
+                            return 1*b.adsorbate_loading_equil[
                                 t, x, j
-                            ] == 10*exp(b.ln_qtoth[t,x])
+                            ] / exp(b.ln_qtoth[t,x]) == 1
                         else:  # invalid configuration
                             raise BurntToast(
                                 "{} encountered unrecognized argument for "
@@ -1944,14 +1951,12 @@ and used when constructing these
                 )
 
         # Particle Nusselt number
-        @self.Constraint(
+        @self.Expression(
             self.flowsheet().time, self.length_domain, doc="Particle Nusselt number"
         )
-        def nusselt_number_particle(b, t, x):
+        def Nu_number(b, t, x):
             if self.config.adsorbent_shape == "particle":
-                return (
-                    b.Nu_number[t, x]
-                    == 2.0
+                return (2.0
                     + 1.1
                     * b.Re_number[t, x] ** 0.3
                     * b.gas_phase.properties[t, x].prandtl_number_phase["Vap"] ** 0.3333
@@ -1959,9 +1964,7 @@ and used when constructing these
             else:
                 # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
                 # currently doubled to help convergence
-                return (
-                    b.Nu_number[t, x]
-                    == 3.66 * 2  # Literature value is 3.66
+                return (3.66 * 2  # Literature value is 3.66
                     # 0.023 * b.Re_number[t, x]** 0.8
                     # * b.gas_phase.properties[t,x].prandtl_number_phase["Vap"] ** 0.3
                 )
@@ -1985,14 +1988,13 @@ and used when constructing these
             )
 
         # Particle Sherwood number
-        @self.Constraint(
+        @self.Expression(
             self.flowsheet().time, self.length_domain, self.adsorbed_components, doc="Particle Sherwood number"
         )
-        def sherwood_number_particle(b, t, x, i):
+        def Sh_number(b, t, x, i):
             if self.config.adsorbent_shape == "particle":
                 return (
-                    b.Sh_number[t, x, i]
-                    == 2.0
+                    2.0
                     + 0.552
                     * b.Re_number[t, x] ** 0.5
                     * b.Sc_number[t, x, i] ** 0.3333
@@ -2000,10 +2002,7 @@ and used when constructing these
             else:
                 # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
                 # currently doubled to help convergence
-                return (
-                    b.Sh_number[t, x, i]
-                    == 3.66 * 2  # Literature value is 3.66
-                )
+                return 3.66 * 2  # Literature value is 3.66
 
         # Gas-solid heat transfer coefficient
         @self.Constraint(
@@ -2334,6 +2333,16 @@ and used when constructing these
         # Create solver
         opt = get_solver(solver, optarg)
 
+        # initial guess for state vars
+        blk.gas_phase.properties[:,:].temperature = blk.gas_inlet.temperature[blk.flowsheet().time.first()]()
+        blk.gas_phase.properties[:,:].pressure = blk.gas_inlet.pressure[blk.flowsheet().time.first()]()
+        blk.gas_phase.properties[:,:].flow_mol = blk.gas_inlet.flow_mol[blk.flowsheet().time.first()]()
+        for k in blk.config.property_package.component_list:
+            blk.gas_phase.properties[:,:].mole_frac_comp[k] = blk.gas_inlet.mole_frac_comp[blk.flowsheet().time.first(),k]()
+            blk.mole_frac_comp_surface[:,:,k] = blk.gas_inlet.mole_frac_comp[blk.flowsheet().time.first(),k]()
+        blk.solid_temperature[:,:] = blk.gas_inlet.temperature[blk.flowsheet().time.first()]()
+        blk.wall_temperature[:,:] = blk.gas_inlet.temperature[blk.flowsheet().time.first()]()
+
         # ---------------------------------------------------------------------
         # Keep all unit model geometry constraints, derivative_var constraints,
         # and property block constraints active. Additionally, in control
@@ -2352,17 +2361,53 @@ and used when constructing these
         )
 
         init_log.info_high("Initialization Step 1 Complete.")
+        blk.gas_phase.release_state(flags)
 
         # ---------------------------------------------------------------------
         # Initialize hydrodynamics (gas velocity)
+        calculate_variable_from_constraint(
+            blk.bed_area,
+            blk.bed_area_eqn,
+        )
+
         for t in blk.flowsheet().time:
             for x in blk.length_domain:
+                calculate_variable_from_constraint(
+                    blk.gas_phase.area[t, x],
+                    blk.gas_phase_area_constraint[t, x],
+                )
+
                 calculate_variable_from_constraint(
                     blk.velocity_superficial_gas[t, x],
                     blk.velocity_superficial_gas_eqn[t, x],
                 )
-        blk.velocity_superficial_gas_eqn.activate()
 
+                calculate_variable_from_constraint(
+                    blk.gas_phase.deltaP[t, x],
+                    blk.gas_phase_config_pressure_drop[t, x],
+                )
+
+                calculate_variable_from_constraint(
+                    blk.adsorbate_loading_equil[t, x, "H2O"],
+                    blk.isotherm_eqn[t, x, "H2O"],
+                )
+
+                if blk.config.coadsorption_isotherm == "Stampi-Bombelli":
+                    calculate_variable_from_constraint(
+                        blk.ln_qtoth[t, x],
+                        blk.ln_qtoth_eq[t, x],
+                    )
+
+                calculate_variable_from_constraint(
+                    blk.adsorbate_loading_equil[t, x, "CO2"],
+                    blk.isotherm_eqn[t, x, "CO2"],
+                )
+
+        # fix and deactivate loading and solids mass transfer
+        blk.adsorbate_loading.fix()
+        blk.mass_transfer_eqn.deactivate()
+      
+        init_log.info("Initialize with fixed loading")
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
             results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
         if check_optimal_termination(results):
@@ -2371,12 +2416,32 @@ and used when constructing these
             )
         else:
             _log.warning("{} Initialization Step 2 Failed.".format(blk.name))
-        blk.gas_phase.release_state(flags)
 
+        blk.adsorbate_loading.unfix()
+        blk.mass_transfer_eqn.activate()
+
+        with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
+            results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
+        if check_optimal_termination(results):
+            init_log.info_high(
+                "Initialization Step 3 {}.".format(idaeslog.condition(results))
+            )
+        else:
+            _log.warning("{} Initialization Step 3 Failed.".format(blk.name))
+
+        # ---------------------------------------------------------------------
+        
     def calculate_scaling_factors(self):
         super().calculate_scaling_factors()
 
         # scale some variables
+        if hasattr(self,"mole_frac_comp_surface"):
+            for (t,x,j), v in self.mole_frac_comp_surface.items():
+                if j == "CO2":
+                    iscale.set_scaling_factor(v, 1e5)
+                elif j == "H2O":
+                    iscale.set_scaling_factor(v, 1e2)
+
         if hasattr(self, "bed_height"):
             sf = 1 / value(self.bed_height)
             iscale.set_scaling_factor(self.bed_height, sf)
