@@ -496,13 +496,13 @@ and used when constructing these
             units=pyunits.m,
         )
 
-        if self.config.adsorbent_shape == "monolith":
-            self.hydraulic_diameter_monolith = Var(
+        if self.config.adsorbent_shape == "monolith" or self.config.adsorbent_shape == "spiral_wound":
+            self.hydraulic_diameter = Var(
                 initialize=0.005,
-                doc="Hydraulic diameter of monolith holes",
+                doc="hydraulic diameter of adsorbent shape",
                 units=pyunits.m,
             )
-            self.hydraulic_diameter_monolith.fix()
+            self.hydraulic_diameter.fix()
         else:
             self.particle_diameter = Var(
                 initialize=2e-3,
@@ -510,6 +510,21 @@ and used when constructing these
                 units=pyunits.m,
             )
             self.particle_diameter.fix()
+
+        if self.config.adsorbent_shape == "spiral_wound":
+            self.core_diameter = Var(
+                initialize=0.00635,
+                doc="diameter of center core in spiral wound module",
+                units=pyunits.m,
+            )
+            self.core_diameter.fix()
+
+            self.wetted_perimeter = Var(
+                initialize=1,
+                doc="wetted perimeter of spiral wound module",
+                units=pyunits.m,
+            )
+            self.wetted_perimeter.fix()
 
         self.wall_diameter = Var(
             initialize=1.0,
@@ -727,26 +742,26 @@ and used when constructing these
         Energy and Environmental Science, 2021
 
         """
-        # Adsorbent parameters
-        self.voidage = Param(
+        # adsorbent parameters
+        self.bed_voidage = Param(
             initialize=0.4,
             units=pyunits.dimensionless,
             doc="Bed voidage - external or interparticle porosity [-]",
         )
-        self.particle_voidage = Param(
+        self.adsorbent_voidage = Param(
             initialize=0.238,
             units=pyunits.dimensionless,
-            doc="Particle voidage - internal or intraparticle porosity [-]",
+            doc="Adsorbent structure voidage (ex. particle voidage) - internal or intrasolid porosity [-]",
         )
         self.cp_mass_param = Param(
             initialize=1580,
             units=pyunits.J / pyunits.kg / pyunits.K,
             doc="Heat capacity of adsorbent [J/kg/K]",
         )
-        self.dens_mass_particle_param = Param(
+        self.skeletal_dens = Param(
             initialize=1155,
             units=pyunits.kg / pyunits.m**3,
-            doc="Density of adsorbent material without pores [kg/m3]",
+            doc="Skeletal density of adsorbent material (without pores) [kg/m3]",
         )
         # corresponding to particle bulk density of 880 kg/m3
         # isotherm parameters
@@ -756,7 +771,7 @@ and used when constructing these
             units=pyunits.J / pyunits.mol,
             doc="Heat of adsorption [J/mol]",
         )
-        # H2O heat of adsorption based on heat of condensation (layer2- layer9)
+        # H2O heat of adsorption based on heat of condensation (layer 2- layer 9)
         self.temperature_ref = Param(
             initialize=298.15, units=pyunits.K, doc="Reference temperature [K]"
         )
@@ -1183,31 +1198,37 @@ and used when constructing these
         # Bed area
         @self.Constraint(doc="Bed area")
         def bed_area_eqn(b):
-            return b.bed_area == (constants.pi * (0.5 * b.bed_diameter) ** 2)
+            if self.config.adsorbent_shape == "spiral_wound":
+                # subtract the area of the center core from the overall area
+                return b.bed_area == (constants.pi * (0.5 * b.bed_diameter) ** 2) - constants.pi*(0.5*b.core_diameter)**2
+            else:
+                return b.bed_area == (constants.pi * (0.5 * b.bed_diameter) ** 2)
 
         @self.Expression(doc="Wet surface area per unit reactor length")
         def wet_surface_area_per_length(b):
             if self.config.adsorbent_shape == "monolith":
-                return 4 * b.bed_area * b.voidage / b.hydraulic_diameter_monolith
+                return 4 * b.bed_area * b.bed_voidage / b.hydraulic_diam
+            elif self.config.adsorbent_shape == "spiral_wound":
+                return b.wetted_perimeter - constants.pi*b.core_diameter
             else:
-                return 6 * b.bed_area * (1 - b.voidage) / b.particle_diameter
+                return 6 * b.bed_area * (1 - b.bed_voidage) / b.particle_dia
 
         # Area of gas side, and solid side
         @self.Constraint(self.flowsheet().time, self.length_domain, doc="Gas side area")
         def gas_phase_area_constraint(b, t, x):
-            return b.gas_phase.area[t, x] == b.bed_area * b.voidage
+            return b.gas_phase.area[t, x] == b.bed_area * b.bed_voidage
 
-        @self.Expression(doc="Particle density (kg/m^3 particle)")
-        def particle_dens(b):
-            return b.dens_mass_particle_param * (1.0 - b.particle_voidage)
-
+        @self.Expression(doc="adsorbent structure/solid density (kg/m^3 solid)")
+        def adsorbent_dens(b):
+            return b.skeletal_dens * (1.0 - b.adsorbent_voidage)
+        
         @self.Expression(doc="Bulk density (kg/m^3 bed)")
         def bulk_dens(b):
-            return b.particle_dens * (1.0 - b.voidage)
+            return b.adsorbent_dens * (1.0 - b.bed_voidage)
 
         @self.Expression(doc="Solid phase area")
         def solid_phase_area(b):
-            return b.bed_area * (1.0 - b.voidage)
+            return b.bed_area * (1.0 - b.bed_voidage)
 
         # ---------------------------------------------------------------------
         # Hydrodynamic constraints
@@ -1230,7 +1251,7 @@ and used when constructing these
             doc="Gas phase interstitial velocity",
         )
         def velocity_gas_phase(b, t, x):
-            return b.velocity_superficial_gas[t, x] / b.voidage
+            return b.velocity_superficial_gas[t, x] / b.bed_voidage
 
         # Gas side pressure drop calculation
         if self.config.has_pressure_change:
@@ -1246,10 +1267,23 @@ and used when constructing these
                     return (
                         b.gas_phase.deltaP[t, x]
                         * b.Re_number[t, x]
-                        * b.hydraulic_diameter_monolith
+                        * b.hydraulic_diameter
                         == -32
                         * b.gas_phase.properties[t, x].dens_mass
                         * b.velocity_gas_phase[t, x] ** 2
+                    )
+            elif self.config.adsorbent_shape == "spiral_wound":
+                @self.Constraint(
+                    self.flowsheet().time,
+                    self.length_domain,
+                    doc="Gas side pressure drop calculation - Hagen-Poiseuille",
+                )
+                def gas_phase_config_pressure_drop(b, t, x):
+                    return (
+                        b.gas_phase.deltaP[t, x] * b.hydraulic_diam**2
+                        == -32
+                        * b.gas_phase.properties[t,x].visc_d_phase["Vap"]
+                        * b.velocity_gas_phase[t, x]
                     )
 
             else:
@@ -1265,7 +1299,7 @@ and used when constructing these
                         return b.gas_phase.deltaP[t, x] == -(
                             0.2 / pyunits.s
                         ) * b.velocity_superficial_gas[t, x] * (
-                            b.dens_mass_particle_param,
+                            b.skeletal_dens,
                             -b.gas_phase.properties[t, x].dens_mass,
                         )
 
@@ -1278,12 +1312,12 @@ and used when constructing these
                     )
                     def gas_phase_config_pressure_drop(b, t, x):
                         return -b.gas_phase.deltaP[t, x] == (
-                            1 - b.voidage
-                        ) / b.voidage**3 * b.velocity_superficial_gas[
+                            1 - b.bed_voidage
+                        ) / b.bed_voidage**3 * b.velocity_superficial_gas[
                             t, x
                         ] / b.particle_diameter * (
                             150
-                            * (1 - b.voidage)
+                            * (1 - b.bed_voidage)
                             * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
                             / b.particle_diameter
                             + 1.75
@@ -1617,7 +1651,7 @@ and used when constructing these
                         - b.adsorbate_loading[t, x, j]
                     )
                     * b.solid_phase_area
-                    * b.particle_dens
+                    * b.adsorbent_dens
                 )
             else:
                 return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == 0.0
@@ -1680,13 +1714,13 @@ and used when constructing these
                 return (
                     b.Re_number[t, x] * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
                     == b.velocity_gas_phase[t, x]
-                    * b.hydraulic_diameter_monolith
+                    * b.hydraulic_diameter
                     * b.gas_phase.properties[t, x].dens_mass
                 )
 
         # Particle Nusselt number
         @self.Expression(
-            self.flowsheet().time, self.length_domain, doc="Particle Nusselt number"
+            self.flowsheet().time, self.length_domain, doc="Nusselt number"
         )
         def Nu_number(b, t, x):
             if self.config.adsorbent_shape == "particle":
@@ -1698,13 +1732,7 @@ and used when constructing these
                 )
             else:
                 # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
-                # currently doubled to help convergence
-                return (
-                    3.66
-                    * 2  # Literature value is 3.66
-                    # 0.023 * b.Re_number[t, x]** 0.8
-                    # * b.gas_phase.properties[t,x].prandtl_number_phase["Vap"] ** 0.3
-                )
+                return 3.66 # Literature value is 3.66
 
         # Gas phase Schmidt number, it is actually a property
         @self.Constraint(
@@ -1732,7 +1760,7 @@ and used when constructing these
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
-            doc="Particle Sherwood number",
+            doc="Sherwood number",
         )
         def Sh_number(b, t, x, i):
             if self.config.adsorbent_shape == "particle":
@@ -1741,7 +1769,9 @@ and used when constructing these
                     + 0.552 * b.Re_number[t, x] ** 0.5 * b.Sc_number[t, x, i] ** 0.3333
                 )
             else:
-                return 3.66 * 2
+                # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
+                # possible correlations in Rezaei 2009
+                return 3.66
 
         # Gas-solid heat transfer coefficient
         @self.Constraint(
@@ -1758,7 +1788,7 @@ and used when constructing these
                 )
             else:
                 return (
-                    b.gas_solid_htc[t, x] * b.hydraulic_diameter_monolith
+                    b.gas_solid_htc[t, x] * b.hydraulic_diameter
                     == b.Nu_number[t, x]
                     * b.gas_phase.properties[t, x].therm_cond_phase["Vap"]
                 )
@@ -1784,7 +1814,7 @@ and used when constructing these
                 )
             else:
                 return (
-                    b.kc_film[t, x] * b.hydraulic_diameter_monolith
+                    b.kc_film[t, x] * b.hydraulic_diameter
                     == b.Sh_number[t, x, i] * diffusivity
                 )
 
@@ -1828,7 +1858,7 @@ and used when constructing these
         )
         def adsorbate_holdup_eqn(b, t, x, j):
             return b.adsorbate_holdup[t, x, j] == (
-                b.solid_phase_area * b.particle_dens * b.adsorbate_loading[t, x, j]
+                b.solid_phase_area * b.adsorbent_dens * b.adsorbate_loading[t, x, j]
             )
 
         # Add component balances of adsorbate
@@ -2119,7 +2149,7 @@ and used when constructing these
             sf = 1 / value(self.bed_diameter)
             iscale.set_scaling_factor(self.bed_diameter, sf)
 
-        if hasattr(self, "hydraulic_diameter_monolith"):
+        if hasattr(self, "hydraulic_diameter"):
             sf = 1 / value(self.hydraulic_diameter_monolith)
             iscale.set_scaling_factor(self.hydraulic_diameter_monolith, sf)
 
@@ -2160,7 +2190,7 @@ and used when constructing these
             if self.config.adsorbent_shape == "particle":
                 sf = 1 / value(self.particle_diameter)
             else:
-                sf = 1 / value(self.hydraulic_diameter_monolith)
+                sf = 1 / value(self.hydraulic_diameter)
             for (t, x), v in self.Re_number.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 1e-5 * sf)
@@ -2176,7 +2206,7 @@ and used when constructing these
             if self.config.adsorbent_shape == "particle":
                 sf = value(self.particle_diameter)
             else:
-                sf = value(self.hydraulic_diameter_monolith)
+                sf = value(self.hydraulic_diameter)
             for (t, x), v in self.gas_solid_htc.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 4 * sf)
