@@ -13,26 +13,26 @@
 """
 IDAES 1D Adsorption Fixed Bed Model.
 
-The 1D adsorption fixed bed model assumes a linear driving force (LDF) mass 
-transfer model with film diffusion. The film mass transfer coefficient is 
+The 1D adsorption fixed bed model assumes a linear driving force (LDF) mass
+transfer model with film diffusion. The film mass transfer coefficient is
 calculated using the correlation from [add reference]. The LDF coefficient is
 calculated using an Arrhenius expression from Low et al. 2025.
 The bed could be a packed bed with sorbent beads or a monolith bed.
 
-Three CO2/H2O co-adsorption isoterms are implemented for Lewatit sorbent: 
-Stampi-Bombelli, Weighted-average dual-site Toth (WADST), and Mechanistic. A 
-key assumption of the implemented isotherms is that water affects CO2 
-adsorption, but CO2 does not affect water adsorption. Adsorption isotherm 
-variables and parameters are also declared locally. 
+Three CO2/H2O co-adsorption isoterms are implemented for Lewatit sorbent:
+Stampi-Bombelli, Weighted-average dual-site Toth (WADST), and Mechanistic. A
+key assumption of the implemented isotherms is that water affects CO2
+adsorption, but CO2 does not affect water adsorption. Adsorption isotherm
+variables and parameters are also declared locally.
 
-The gas phase is modeled using the IDAES ControlVolume1DBlock unit model, while 
-the solid phase balances are written locally. 
+The gas phase is modeled using the IDAES ControlVolume1DBlock unit model, while
+the solid phase balances are written locally.
 
-The gas phase is modeled as an ideal mixture, using the IDAES generic property 
-model block.The solid phase properties are declared locally (without using 
-a solid property package). 
+The gas phase is modeled as an ideal mixture, using the IDAES generic property
+model block.The solid phase properties are declared locally (without using
+a solid property package).
 
-Enthalpy transfer due to mass transfer between gas and solid phases is 
+Enthalpy transfer due to mass transfer between gas and solid phases is
 considered. Column wall and water jacket for heating and cooling is considered.
 
 Other modeling assumptions:
@@ -40,14 +40,14 @@ Other modeling assumptions:
 - Uniform in radius direction
 - No diffusion or heat conduction in axial direction
 
-References: 
-    
-Low, M.-Y. (Ashlyn)., Danaci, D., Sturman, C., Petit, C. “Quantification of 
-Temperature-Dependent CO2 Adsorption Kinetics in Lewatit VP OC 1065, Purolite 
+References:
+
+Low, M.-Y. (Ashlyn)., Danaci, D., Sturman, C., Petit, C. “Quantification of
+Temperature-Dependent CO2 Adsorption Kinetics in Lewatit VP OC 1065, Purolite
 A110, and TIFSIX-3-Ni for Direct Air Capture”. Chemical Engineering
 Research and Design 2025, 215, 443–452.
 
-Need: reference for film mass transfer coefficient 
+Need: reference for film mass transfer coefficient
 """
 
 # Import Pyomo libraries
@@ -56,6 +56,7 @@ from pyomo.environ import (
     Var,
     Param,
     Reals,
+    PositiveReals,
     value,
     TransformationFactory,
     Constraint,
@@ -296,11 +297,11 @@ dyameter.}""",
         "adsorbent_shape",
         ConfigValue(
             default="particle",
-            domain=In(["particle", "monolith"]),
+            domain=In(["particle", "monolith", "spiral_wound"]),
             description="Adsorbent shape",
             doc="""Construction flag to add adsorbent shape.
         Default: particle.
-        Valid values: "particle", "monolith".""",
+        Valid values: "particle", "monolith", "spiral_wound".""",
         ),
     )
 
@@ -496,7 +497,10 @@ and used when constructing these
             units=pyunits.m,
         )
 
-        if self.config.adsorbent_shape == "monolith" or self.config.adsorbent_shape == "spiral_wound":
+        if (
+            self.config.adsorbent_shape == "monolith"
+            or self.config.adsorbent_shape == "spiral_wound"
+        ):
             self.hydraulic_diameter = Var(
                 initialize=0.005,
                 doc="hydraulic diameter of adsorbent shape",
@@ -1126,9 +1130,9 @@ and used when constructing these
         self.solid_temperature = Var(
             self.flowsheet().time,
             self.length_domain,
-            domain=Reals,
+            domain=PositiveReals,
             initialize=300,
-            bounds=(20 + 273.15, 50 + 273.15),
+            bounds=(-25 + 273.15, 250 + 273.15),
             doc="Solid phase temperature",
             units=pyunits.K,
         )
@@ -1200,18 +1204,22 @@ and used when constructing these
         def bed_area_eqn(b):
             if self.config.adsorbent_shape == "spiral_wound":
                 # subtract the area of the center core from the overall area
-                return b.bed_area == (constants.pi * (0.5 * b.bed_diameter) ** 2) - constants.pi*(0.5*b.core_diameter)**2
+                return (
+                    b.bed_area
+                    == (constants.pi * (0.5 * b.bed_diameter) ** 2)
+                    - constants.pi * (0.5 * b.core_diameter) ** 2
+                )
             else:
                 return b.bed_area == (constants.pi * (0.5 * b.bed_diameter) ** 2)
 
         @self.Expression(doc="Wet surface area per unit reactor length")
         def wet_surface_area_per_length(b):
             if self.config.adsorbent_shape == "monolith":
-                return 4 * b.bed_area * b.bed_voidage / b.hydraulic_diam
+                return 4 * b.bed_area * b.bed_voidage / b.hydraulic_diameter
             elif self.config.adsorbent_shape == "spiral_wound":
-                return b.wetted_perimeter - constants.pi*b.core_diameter
+                return b.wetted_perimeter - constants.pi * b.core_diameter
             else:
-                return 6 * b.bed_area * (1 - b.bed_voidage) / b.particle_dia
+                return 6 * b.bed_area * (1 - b.bed_voidage) / b.particle_diameter
 
         # Area of gas side, and solid side
         @self.Constraint(self.flowsheet().time, self.length_domain, doc="Gas side area")
@@ -1221,7 +1229,7 @@ and used when constructing these
         @self.Expression(doc="adsorbent structure/solid density (kg/m^3 solid)")
         def adsorbent_dens(b):
             return b.skeletal_dens * (1.0 - b.adsorbent_voidage)
-        
+
         @self.Expression(doc="Bulk density (kg/m^3 bed)")
         def bulk_dens(b):
             return b.adsorbent_dens * (1.0 - b.bed_voidage)
@@ -1272,7 +1280,9 @@ and used when constructing these
                         * b.gas_phase.properties[t, x].dens_mass
                         * b.velocity_gas_phase[t, x] ** 2
                     )
+
             elif self.config.adsorbent_shape == "spiral_wound":
+
                 @self.Constraint(
                     self.flowsheet().time,
                     self.length_domain,
@@ -1280,9 +1290,9 @@ and used when constructing these
                 )
                 def gas_phase_config_pressure_drop(b, t, x):
                     return (
-                        b.gas_phase.deltaP[t, x] * b.hydraulic_diam**2
+                        b.gas_phase.deltaP[t, x] * b.hydraulic_diameter**2
                         == -32
-                        * b.gas_phase.properties[t,x].visc_d_phase["Vap"]
+                        * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
                         * b.velocity_gas_phase[t, x]
                     )
 
@@ -1339,13 +1349,13 @@ and used when constructing these
             doc="relative humidity constraint",
         )
         def RH_eqn(b, t, x):
-            # Use gas phase temperature instead of solid temperature seems help 
+            # Use gas phase temperature instead of solid temperature seems help
             # the convergence
-            # Use solid tempreature may cause condensation at the begining of 
+            # Use solid tempreature may cause condensation at the begining of
             # desorption
             T = b.gas_phase.properties[t, x].temperature
             X1 = T / (273.15 * pyunits.K)
-            # water saturation pressure based on ALAMO fitted model, which 
+            # water saturation pressure based on ALAMO fitted model, which
             # seems better than other models in terms of convergence
             p_vap = (
                 -159601176.32580688595772 * X1
@@ -1580,7 +1590,7 @@ and used when constructing these
                 c = exp((E1 - E10) / constants.gas_constant / T)
                 k = exp((E2_9 - E10) / constants.gas_constant / T)
                 rh = b.RH[t, x]
-                # rh_limit = min(0.95, rh) Note that without limiting this, the 
+                # rh_limit = min(0.95, rh) Note that without limiting this, the
                 # steam sweep will cause rh>1 and the solver will diverge
                 rh_limit = 0.5 * (rh + 0.95 - sqrt((rh - 0.95) * (rh - 0.95) + 1e-10))
                 # rh_limits = max(1, rh_limit)
@@ -1732,7 +1742,7 @@ and used when constructing these
                 )
             else:
                 # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
-                return 3.66 # Literature value is 3.66
+                return 3.66  # Literature value is 3.66
 
         # Gas phase Schmidt number, it is actually a property
         @self.Constraint(
@@ -1814,7 +1824,7 @@ and used when constructing these
                 )
             else:
                 return (
-                    b.kc_film[t, x] * b.hydraulic_diameter
+                    b.kc_film[t, x, i] * b.hydraulic_diameter
                     == b.Sh_number[t, x, i] * diffusivity
                 )
 
@@ -1885,7 +1895,7 @@ and used when constructing these
         def solid_energy_holdup_eqn(b, t, x):
             return b.solid_energy_holdup[t, x] == (
                 b.solid_phase_area
-                * b.particle_dens
+                * b.adsorbent_dens
                 * b.cp_mass_param
                 * (b.solid_temperature[t, x] - b.temperature_ref)
                 + sum(
@@ -2035,6 +2045,9 @@ and used when constructing these
             solver=solver,
         )
 
+        init_log.info_high("Initialization Step 1 Complete.")
+        blk.gas_phase.release_state(flags)
+
         # ---------------------------------------------------------------------
         # Initialize hydrodynamics (gas velocity)
         calculate_variable_from_constraint(
@@ -2083,7 +2096,7 @@ and used when constructing these
                 gas_inlet_flags[n, i] = v[i].fixed
         # =============================================
 
-        # setting port states for initialization. # this causes one of the 
+        # setting port states for initialization. # this causes one of the
         # cases to fail right now, will fix soon
         init_log.info_high("Fixing Inlet Port States")
         blk.gas_inlet.fix()
@@ -2150,8 +2163,8 @@ and used when constructing these
             iscale.set_scaling_factor(self.bed_diameter, sf)
 
         if hasattr(self, "hydraulic_diameter"):
-            sf = 1 / value(self.hydraulic_diameter_monolith)
-            iscale.set_scaling_factor(self.hydraulic_diameter_monolith, sf)
+            sf = 1 / value(self.hydraulic_diameter)
+            iscale.set_scaling_factor(self.hydraulic_diameter, sf)
 
         if hasattr(self, "particle_diameter"):
             sf = 1 / value(self.particle_diameter)
@@ -2184,7 +2197,7 @@ and used when constructing these
         if hasattr(self, "velocity_superficial_gas"):
             iscale.set_scaling_factor(self.velocity_superficial_gas, 10)
 
-        # Re number assuming velocity of 1 m/s and density of 1 kg/m^3 and 
+        # Re number assuming velocity of 1 m/s and density of 1 kg/m^3 and
         # viscosity of 1e-5
         if hasattr(self, "Re_number"):
             if self.config.adsorbent_shape == "particle":
