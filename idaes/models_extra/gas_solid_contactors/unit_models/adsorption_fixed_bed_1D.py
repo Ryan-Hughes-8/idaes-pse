@@ -280,7 +280,16 @@ for pressure drop in moving-bed reactors,
 dyameter.}""",
         ),
     )
-
+    CONFIG.declare(
+        "adsorbed_components",
+        ConfigValue(
+            default=["CO2", "H2O"],
+            domain=list,
+            description="List of adsorbed components",
+            doc="""Construction flag for the list of adsorbed components. Model currently only supports CO2, H2O, and N2.
+            Default: ['CO2', 'H2O'].""",
+        ),
+    )
     CONFIG.declare(
         "adsorbent",
         ConfigValue(
@@ -560,37 +569,47 @@ and used when constructing these
             doc="Cooling or heating fluid temperature",
         )
 
-        # Add adsorbent parameters
+        # Add required adsorbent parameters (not dependant on specific adsorbent, initial values based on Lewatit)
+        self.adsorbed_components = Set(initialize=self.config.adsorbed_components)
+        cp_mol_comp_adsorbate_dict = {"CO2": 36.61, "H2O": 33.59, "N2": 29.12}
+        self.cp_mol_comp_adsorbate = Param(
+            self.adsorbed_components,
+            initialize={
+                k: cp_mol_comp_adsorbate_dict[k] for k in self.adsorbed_components
+            },
+            units=pyunits.J / pyunits.mol / pyunits.K,
+            doc="Heat capacity of adsorbate at 298.15 K",
+        )
+        self.bed_voidage = Param(
+            initialize=0.4,
+            units=pyunits.dimensionless,
+            doc="Bed voidage - external or interparticle porosity [-]",
+        )
+        self.adsorbent_voidage = Param(
+            initialize=0.238,
+            units=pyunits.dimensionless,
+            doc="Adsorbent structure voidage (ex. particle voidage) - internal or intrasolid porosity [-]",
+        )
+        self.cp_mass_param = Param(
+            initialize=1580,
+            units=pyunits.J / pyunits.kg / pyunits.K,
+            doc="Heat capacity of adsorbent [J/kg/K]",
+        )
+        self.skeletal_dens = Param(
+            initialize=1155,
+            units=pyunits.kg / pyunits.m**3,
+            doc="Skeletal density of adsorbent material (without pores) [kg/m3]",
+        )
+        self.dh_ads = Param(
+            self.adsorbed_components,
+            initialize={"CO2": -70000, "H2O": -46000},
+            units=pyunits.J / pyunits.mol,
+            doc="Heat of adsorption [J/mol]",
+        )
         if self.config.adsorbent == "Lewatit":
-            self.adsorbed_components = Set(initialize=["CO2", "H2O"])
-            self.enth_mol_comp_std = Param(
-                self.adsorbed_components,
-                initialize={"CO2": -393522.4, "H2O": -241826.0},
-                units=pyunits.J / pyunits.mol,
-                doc="Standard heat of formation of gas species at 298.15 K",
-            )
-            self.cp_mol_comp_adsorbate = Param(
-                self.adsorbed_components,
-                initialize={"CO2": 36.61, "H2O": 4.184 * 18.0},
-                units=pyunits.J / pyunits.mol / pyunits.K,
-                doc="Heat capacity of adsorbate at 298.15 K",
-            )
             self._add_parameters_lewatit()
 
         elif self.config.adsorbent == "custom_model":
-            self.adsorbed_components = Set(initialize=["XX", "ZZ"])
-            self.enth_mol_comp_std = Param(
-                self.adsorbed_components,
-                initialize={"XX": 0.0, "ZZ": 0.0},
-                units=pyunits.J / pyunits.mol,
-                doc="Standard heat of formation of gas species at 298.15 K",
-            )
-            self.cp_mol_comp_adsorbate = Param(
-                self.adsorbed_components,
-                initialize={"XX": 0.0, "ZZ": 0.0},
-                units=pyunits.J / pyunits.mol / pyunits.K,
-                doc="Heat capacity of adsorbate at 298.15 K",
-            )
             self._add_parameters_custom_model()
 
         else:
@@ -747,36 +766,7 @@ and used when constructing these
         Energy and Environmental Science, 2021
 
         """
-        # adsorbent parameters
-        self.bed_voidage = Param(
-            initialize=0.4,
-            units=pyunits.dimensionless,
-            doc="Bed voidage - external or interparticle porosity [-]",
-        )
-        self.adsorbent_voidage = Param(
-            initialize=0.238,
-            units=pyunits.dimensionless,
-            doc="Adsorbent structure voidage (ex. particle voidage) - internal or intrasolid porosity [-]",
-        )
-        self.cp_mass_param = Param(
-            initialize=1580,
-            units=pyunits.J / pyunits.kg / pyunits.K,
-            doc="Heat capacity of adsorbent [J/kg/K]",
-        )
-        self.skeletal_dens = Param(
-            initialize=1155,
-            units=pyunits.kg / pyunits.m**3,
-            doc="Skeletal density of adsorbent material (without pores) [kg/m3]",
-        )
-        # corresponding to particle bulk density of 880 kg/m3
         # isotherm parameters
-        self.dh_ads = Param(
-            self.adsorbed_components,
-            initialize={"CO2": -70000, "H2O": -46000},
-            units=pyunits.J / pyunits.mol,
-            doc="Heat of adsorption [J/mol]",
-        )
-        # H2O heat of adsorption based on heat of condensation (layer 2- layer 9)
         self.temperature_ref = Param(
             initialize=298.15, units=pyunits.K, doc="Reference temperature [K]"
         )
@@ -1902,7 +1892,7 @@ and used when constructing these
                 + sum(
                     b.adsorbate_holdup[t, x, i]
                     * (
-                        b.enth_mol_comp_std[i]
+                        getattr(b.config.property_package, i).enth_mol_form_vap_comp_ref
                         + b.dh_ads[i]
                         + b.cp_mol_comp_adsorbate[i]
                         * (b.solid_temperature[t, x] - b.temperature_ref)
