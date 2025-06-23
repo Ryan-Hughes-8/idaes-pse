@@ -336,7 +336,18 @@ dyameter.}""",
             to use. "Fixed" is a single fixed value and "Macropore uses an equation relating
             sorbent properties and effective diffusion to the mass transfer coefficient.
             Default: "Fixed".
-            Valide values: "Fixed", "Macropore","Arrhenius".""",
+            Valid values: "Fixed", "Macropore","Arrhenius".""",
+        ),
+    )
+
+    CONFIG.declare(
+        "custom_adsorbent_function",
+        ConfigValue(
+            default=None,
+            domain=None,
+            description="function to add isotherm equation for custom adsorbent",
+            doc="""User supplied function to add isotherm parameters and equation for custom sorbent.
+            Default=None.""",
         ),
     )
 
@@ -602,34 +613,16 @@ and used when constructing these
         )
         self.dh_ads = Param(
             self.adsorbed_components,
-            initialize={"CO2": -70000, "H2O": -46000},
             units=pyunits.J / pyunits.mol,
             doc="Heat of adsorption [J/mol]",
         )
-        if self.config.adsorbent == "Lewatit":
-            self._add_parameters_lewatit()
-
-        elif self.config.adsorbent == "custom_model":
-            self._add_parameters_custom_model()
-
-        else:
-            raise ConfigurationError(
-                "{} invalid value for "
-                "adsorbent argument."
-                "Must be "
-                "Lewatit."
-                "or"
-                "custom_model"
-                " "
-                "Please provide a valid value.".format(self.name)
-            )
 
         # Mass transfer coefficient type
         self.kf = Var(
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
-            initialize=0.01,  # {"CO2":1.5e-3,"H2O":0.03},
+            initialize=0.01,
             units=1 / pyunits.s,
             bounds=(1e-5, 1),
             doc="Mass transfer parameter for LDF model",
@@ -637,7 +630,7 @@ and used when constructing these
         if self.config.mass_transfer_coefficient_type == "Macropore":
             self.C1 = Var(
                 self.adsorbed_components,
-                initialize={"CO2": 1.68e-12, "H2O": 3.29e-11},
+                initialize=1e-12,
                 units=pyunits.m**2 * pyunits.K**-0.5 * pyunits.seconds**-1,
                 bounds=(1e-13, 1e-10),
                 doc="Lumped parameter for macropore mass transfer coefficient calculation",
@@ -647,7 +640,7 @@ and used when constructing these
 
             self.ln_k0_LDF = Var(
                 self.adsorbed_components,
-                initialize={"CO2": 9.25, "H2O": -3.50656},
+                initialize=0,
                 units=pyunits.dimensionless,  # for k = 1/s
                 bounds=(None, None),
                 doc="ln(k0) for Arrhenius LDF coefficient",
@@ -655,7 +648,7 @@ and used when constructing these
             self.ln_k0_LDF.fix()
             self.E_LDF = Var(
                 self.adsorbed_components,
-                initialize={"CO2": 38870, "H2O": 0},
+                initialize=38870,
                 units=pyunits.J / pyunits.mol,  # for k = 1/s
                 bounds=(0, 200000),
                 doc="E for Arrhenius LDF coefficient",
@@ -752,9 +745,9 @@ and used when constructing these
         self._make_performance()
         self._apply_transformation()
 
-    def _add_parameters_lewatit(self):
+    def _add_lewatit(self):
         """
-        Method to add NIST Lewatit VP OC 1062 adsorbent-related parameters.
+        Method to add NIST Lewatit VP OC 1062 adsorbent-related parameters and equations.
         The CO2 isotherm is modeled using the Toth model with terms corrected
         for H2O co-adsorption.
         H2O adsorption is modeled using the GAB model. Three options are
@@ -766,7 +759,24 @@ and used when constructing these
         Energy and Environmental Science, 2021
 
         """
-        # isotherm parameters
+        # update sorbent parameters for lewatit =====================
+        self.bed_voidage = 0.4
+        self.adsorbent_voidage = 0.238
+        self.cp_mass_param = 1580
+        self.skeletal_dens = 1155
+        self.dh_ads["CO2"] = -70000
+        self.dh_ads["H2O"] = -46000
+
+        if self.config.mass_transfer_coefficient_type == "Macropore":
+            self.C1["CO2"] = 1.68e-12
+            self.C1["CO2"] = 3.29e-11
+        elif self.config.mass_transfer_coefficient_type == "Arrhenius":
+            self.ln_k0_LDF["CO2"] = 9.25
+            self.ln_k0_LDF["H2O"] = -3.50656
+            self.E_LDF["CO2"] = 38870
+            self.E_LDF["H2O"] = 0
+
+        # add isotherm parameters ================================
         self.temperature_ref = Param(
             initialize=298.15, units=pyunits.K, doc="Reference temperature [K]"
         )
@@ -873,7 +883,6 @@ and used when constructing these
                 units=pyunits.J / pyunits.mol,
                 doc="WADST model parameter heat of adsorption for wet case [J/mol]",
             )
-
         elif self.config.coadsorption_isotherm == "Mechanistic":
             self.MECH_fblock_max = Param(
                 initialize=0.433,
@@ -916,61 +925,241 @@ and used when constructing these
             )
             self.SB_beta.fix()
 
-    def _add_parameters_custom_model(self):
+        # isotherm equations ============================================
+        if self.config.coadsorption_isotherm == "Mechanistic":
+            self.ln_qtoth = Var(
+                self.flowsheet().time,
+                self.length_domain,
+                initialize=0,
+                bounds=(None, 3),
+                doc="natural log of qdry for mechanistic isotherm model",
+                units=None,
+            )
+
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                doc="tau for mechansitic lewatit model",
+            )
+            def tau(b, t, x):
+                T = b.solid_temperature[t, x]
+                return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
+
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                self.adsorbed_components,
+                doc="component partial pressure used in isotherm equations",
+            )
+            def pres(b, t, x, j):
+                return (
+                    b.gas_phase.properties[t, x].pressure
+                    * b.mole_frac_comp_surface[t, x, j]
+                )
+
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                doc="term in log transformed mechanistic isotherm equation, ln(b*p)",
+            )
+            def ln_b_p(b, t, x):
+                T = b.solid_temperature[t, x]
+                exp_term = exp(-b.MECH_A / b.adsorbate_loading_equil[t, x, "H2O"])
+                hoa_ave = (1 - exp_term) * b.hoa + exp_term * b.MECH_hoa_wet
+                # smooth max of (pmin,pres)
+                eps = 1e-8
+                pmin = 1e-10
+                pres_smooth_max = 0.5 * (
+                    b.pres[t, x, "CO2"]
+                    + pmin
+                    + ((b.pres[t, x, "CO2"] - pmin) ** 2 + (eps * pyunits.Pa) ** 2)
+                    ** 0.5
+                )
+                return (
+                    log(b.b0)
+                    + (-hoa_ave / constants.gas_constant / T)
+                    + log(pres_smooth_max)
+                )
+
+            @self.Constraint(
+                self.flowsheet().time,
+                self.length_domain,
+                doc="""constraint for log transformed mechanistic isotherm model""",
+            )
+            def ln_qtoth_eq(b, t, x):
+                return b.tau[t, x] * b.ln_qtoth[t, x] == b.tau[t, x] * log(
+                    self.q0_inf
+                ) + b.tau[t, x] * b.ln_b_p[t, x] - log(
+                    1 + exp(b.tau[t, x] * b.ln_b_p[t, x])
+                )
+
+        elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
+            self.ln_qtoth = Var(
+                self.flowsheet().time,
+                self.length_domain,
+                initialize=0,
+                bounds=(None, 3),
+                doc="natural log of qdry for isotherm model",
+                units=None,
+            )
+
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                doc="temperature dependency of q_inf, ln transformed",
+            )
+            def ln_q_inf(b, t, x):
+                T = b.solid_temperature[t, x]
+                ln_q_inf_dry = log(b.q0_inf) + b.X * (1 - b.temperature_ref / T)
+                a = smooth_max(
+                    1e-10, 1 - b.SB_gamma * b.adsorbate_loading_equil[t, x, "H2O"]
+                )
+                return ln_q_inf_dry - log(a)
+
+            @self.Expression(
+                self.flowsheet().time, self.length_domain, doc="tau for toth model"
+            )
+            def tau(b, t, x):
+                T = b.solid_temperature[t, x]
+                return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
+
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                self.adsorbed_components,
+                doc="component partial pressure used in isotherm equations",
+            )
+            def pres(b, t, x, j):
+                return (
+                    b.gas_phase.properties[t, x].pressure
+                    * b.mole_frac_comp_surface[t, x, j]
+                )
+
+            @self.Expression(
+                self.flowsheet().time,
+                self.length_domain,
+                doc="term in log transformed SB isotherm equation, ln(b*p)",
+            )
+            def ln_b_p(b, t, x):
+                T = b.solid_temperature[t, x]
+                ln_b_dry = log(b.b0) + (-b.hoa / constants.gas_constant / T)
+                a = smooth_max(
+                    1e-10, 1 + b.SB_beta * b.adsorbate_loading_equil[t, x, "H2O"]
+                )
+                pres_smooth_max = smooth_max(1e-10, b.pres[t, x, "CO2"], eps=1e-8)
+                return ln_b_dry + log(a) + log(pres_smooth_max)
+
+            @self.Constraint(
+                self.flowsheet().time,
+                self.length_domain,
+                doc="""constraint for log transformed mechanistic isotherm model""",
+            )
+            def ln_qtoth_eq(b, t, x):
+                return 10 * (b.tau[t, x] * b.ln_qtoth[t, x]) == 10 * (
+                    b.tau[t, x] * b.ln_q_inf[t, x]
+                    + b.tau[t, x] * b.ln_b_p[t, x]
+                    - log(1 + exp(b.tau[t, x] * b.ln_b_p[t, x]))
+                )
+
+        @self.Constraint(
+            self.flowsheet().time,
+            self.length_domain,
+            self.adsorbed_components,
+            doc=""""Equilibrium loading based on gas phase composition""",
+        )
+        def isotherm_eqn(b, t, x, j):
+            pres = {}
+            # use external surface mole fractions
+            for i in b.adsorbed_components:
+                pres[i] = (
+                    b.gas_phase.properties[t, x].pressure
+                    * b.mole_frac_comp_surface[t, x, i]
+                )
+            T = b.solid_temperature[t, x]
+
+            # Those constraints seem to help convergence
+            q_h2o = b.adsorbate_loading_equil[t, x, "H2O"]
+            if j == "CO2":
+                if self.config.coadsorption_isotherm == "None":
+                    b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
+                    b_p = b_ * pres[j]
+                    tau = self.tau0 + self.alpha * (1 - self.temperature_ref / T)
+                    return b.adsorbate_loading_equil[t, x, j] == self.q0_inf * b_p / (
+                        1 + b_p**tau
+                    ) ** (1 / tau)
+                else:  # consider co-adsorption effect, need water loading
+                    if self.config.coadsorption_isotherm == "Mechanistic":
+                        fblock = self.MECH_fblock_max * (
+                            1 - exp(-((self.MECH_k * q_h2o) ** self.MECH_n))
+                        )
+                        phi_avialable = 1.0 - fblock
+                        exp_term = exp(-self.MECH_A / q_h2o)
+                        phi = (
+                            self.MECH_phi_dry
+                            + (phi_avialable - self.MECH_phi_dry) * exp_term
+                        )
+                        return b.adsorbate_loading_equil[
+                            t, x, j
+                        ] * self.MECH_phi_dry == phi * exp(b.ln_qtoth[t, x])
+                    elif self.config.coadsorption_isotherm == "WADST":
+                        b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
+                        b_p = b_ * pres[j]
+                        tau = self.tau0 + self.alpha * (1 - self.temperature_ref / T)
+                        q_dry = self.q0_inf * b_p / (1 + b_p**tau) ** (1 / tau)
+                        b_wet = self.WADST_b0_wet * exp(
+                            -self.WADST_hoa_wet / constants.gas_constant / T
+                        )
+                        b_p_wet = b_wet * pres[j]
+                        tau_wet = self.WADST_tau0_wet + self.WADST_alpha_wet * (
+                            1 - self.temperature_ref / T
+                        )
+                        q_wet = (
+                            self.WADST_q0_inf_wet
+                            * b_p_wet
+                            / (1 + b_p_wet**tau_wet) ** (1 / tau_wet)
+                        )
+                        return (
+                            b.adsorbate_loading_equil[t, x, j]
+                            == (1 - exp(-self.WADST_A / q_h2o)) * q_dry
+                            + exp(-self.WADST_A / q_h2o) * q_wet
+                        )
+                    elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
+                        return (
+                            1
+                            * b.adsorbate_loading_equil[t, x, j]
+                            / exp(b.ln_qtoth[t, x])
+                            == 1
+                        )
+                    else:  # invalid configuration
+                        raise BurntToast(
+                            "{} encountered unrecognized argument for "
+                            "CO2-H2O co-adsorption isotherm type. Please contact the IDAES"
+                            " developers with this bug.".format(self.name)
+                        )
+            elif j == "H2O":
+                E1 = self.GAB_C - exp(self.GAB_D * T) * pyunits.J / pyunits.mol
+                E2_9 = self.GAB_F + self.GAB_G * T
+                E10 = self.GAB_A + self.GAB_B * T
+                c = exp((E1 - E10) / constants.gas_constant / T)
+                k = exp((E2_9 - E10) / constants.gas_constant / T)
+                rh = b.RH[t, x]
+                # rh_limit = min(0.95, rh) Note that without limiting this, the
+                # steam sweep will cause rh>1 and the solver will diverge
+                rh_limit = 0.5 * (rh + 0.95 - sqrt((rh - 0.95) * (rh - 0.95) + 1e-10))
+                # rh_limits = max(1, rh_limit)
+                rh_limit2 = 0.5 * (rh_limit + sqrt(rh_limit * rh_limit + 1e-10))
+                kx = k * rh_limit2
+                return (
+                    b.adsorbate_loading_equil[t, x, j] * (1 - kx) * (1 + (c - 1) * kx)
+                    == self.GAB_qm * c * kx
+                )
+
+    def _add_custom_equations(self):
         """
         Method to add adsorbent-related parameters to run fixed bed model.
         This method is to add parameters for custom isotherm.
         """
-        # adsorbent parameters
-        self.voidage = Param(
-            initialize=0.4,
-            units=pyunits.dimensionless,
-            doc="Bed voidage - external or interparticle porosity [-]",
-        )
-        self.particle_voidage = Param(
-            initialize=0.238,
-            units=pyunits.dimensionless,
-            doc="Particle voidage - internal or intraparticle porosity [-]",
-        )
-        self.cp_mass_param = Param(
-            initialize=0.0,
-            units=pyunits.J / pyunits.kg / pyunits.K,
-            doc="Heat capacity of adsorbent [J/kg/K]",
-        )
-        self.dens_mass_particle_param = Param(
-            initialize=0.0,
-            units=pyunits.kg / pyunits.m**3,
-            doc="Density of adsorbent material without pore [kg/m3]",
-        )
-        # corresponding to particle bulk density of 880 kg/m3
-        # isotherm parameters
-        self.dh_ads = Param(
-            self.adsorbed_components,
-            initialize={"XX": 0.0, "ZZ": 0.0},
-            units=pyunits.J / pyunits.mol,
-            doc="Heat of adsorption [J/mol]",
-        )
-        # H2O heat of adsorption based on heat of condensation (layer 2- layer 9)
-        self.temperature_ref = Param(
-            initialize=298.15, units=pyunits.K, doc="Reference temperature [K]"
-        )
-
-        # Add extra model parameters as preseneted below
-        # self.parameter = Param(
-        #     initialize=value,
-        #     units=pyunits.mol / pyunits.kg,
-        #     doc="Isotherm parameter based on single species isotherm [mol/kg]",
-        #     mutable=True,
-        # )
-
-    def _isotherm_lewatit(self, i, pressure, temperature):
-        # TODO Need to add the isotherm
-        pass
-
-    def _isotherm_custom_model(self, i, pressure, temperature):
-        # Add here custom isotherm
-        # return loading
-        pass
+        self.config.custom_sorbent_method()
 
     # =========================================================================
     def _apply_transformation(self):
@@ -1363,234 +1552,21 @@ and used when constructing these
                 / p_vap
             )
 
-        # add extra equations for log transformation of Lewatit mechanistic model
-        if self.config.coadsorption_isotherm == "Mechanistic":
-            self.ln_qtoth = Var(
-                self.flowsheet().time,
-                self.length_domain,
-                initialize=0,
-                bounds=(None, 3),
-                doc="natural log of qdry for mechanistic isotherm model",
-                units=None,
+        if self.config.adsorbent == "Lewatit":
+            self._add_lewatit()
+        elif self.config.adsorbent == "custom_model":
+            self._add_custom_equations()
+        else:
+            raise ConfigurationError(
+                "{} invalid value for "
+                "adsorbent argument."
+                "Must be "
+                "Lewatit."
+                "or"
+                "custom_model"
+                " "
+                "Please provide a valid value.".format(self.name)
             )
-
-            @self.Expression(
-                self.flowsheet().time,
-                self.length_domain,
-                doc="tau for mechansitic lewatit model",
-            )
-            def tau(b, t, x):
-                T = b.solid_temperature[t, x]
-                return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
-
-            @self.Expression(
-                self.flowsheet().time,
-                self.length_domain,
-                self.adsorbed_components,
-                doc="component partial pressure used in isotherm equations",
-            )
-            def pres(b, t, x, j):
-                return (
-                    b.gas_phase.properties[t, x].pressure
-                    * b.mole_frac_comp_surface[t, x, j]
-                )
-
-            @self.Expression(
-                self.flowsheet().time,
-                self.length_domain,
-                doc="term in log transformed mechanistic isotherm equation, ln(b*p)",
-            )
-            def ln_b_p(b, t, x):
-                T = b.solid_temperature[t, x]
-                exp_term = exp(-b.MECH_A / b.adsorbate_loading_equil[t, x, "H2O"])
-                hoa_ave = (1 - exp_term) * b.hoa + exp_term * b.MECH_hoa_wet
-                # smooth max of (pmin,pres)
-                eps = 1e-8
-                pmin = 1e-10
-                pres_smooth_max = 0.5 * (
-                    b.pres[t, x, "CO2"]
-                    + pmin
-                    + ((b.pres[t, x, "CO2"] - pmin) ** 2 + (eps * pyunits.Pa) ** 2)
-                    ** 0.5
-                )
-                return (
-                    log(b.b0)
-                    + (-hoa_ave / constants.gas_constant / T)
-                    + log(pres_smooth_max)
-                )
-
-            @self.Constraint(
-                self.flowsheet().time,
-                self.length_domain,
-                doc="""constraint for log transformed mechanistic isotherm model""",
-            )
-            def ln_qtoth_eq(b, t, x):
-                return b.tau[t, x] * b.ln_qtoth[t, x] == b.tau[t, x] * log(
-                    self.q0_inf
-                ) + b.tau[t, x] * b.ln_b_p[t, x] - log(
-                    1 + exp(b.tau[t, x] * b.ln_b_p[t, x])
-                )
-
-        elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
-            self.ln_qtoth = Var(
-                self.flowsheet().time,
-                self.length_domain,
-                initialize=0,
-                bounds=(None, 3),
-                doc="natural log of qdry for isotherm model",
-                units=None,
-            )
-
-            @self.Expression(
-                self.flowsheet().time,
-                self.length_domain,
-                doc="temperature dependency of q_inf, ln transformed",
-            )
-            def ln_q_inf(b, t, x):
-                T = b.solid_temperature[t, x]
-                ln_q_inf_dry = log(b.q0_inf) + b.X * (1 - b.temperature_ref / T)
-                a = smooth_max(
-                    1e-10, 1 - b.SB_gamma * b.adsorbate_loading_equil[t, x, "H2O"]
-                )
-                return ln_q_inf_dry - log(a)
-
-            @self.Expression(
-                self.flowsheet().time, self.length_domain, doc="tau for toth model"
-            )
-            def tau(b, t, x):
-                T = b.solid_temperature[t, x]
-                return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
-
-            @self.Expression(
-                self.flowsheet().time,
-                self.length_domain,
-                self.adsorbed_components,
-                doc="component partial pressure used in isotherm equations",
-            )
-            def pres(b, t, x, j):
-                return (
-                    b.gas_phase.properties[t, x].pressure
-                    * b.mole_frac_comp_surface[t, x, j]
-                )
-
-            @self.Expression(
-                self.flowsheet().time,
-                self.length_domain,
-                doc="term in log transformed SB isotherm equation, ln(b*p)",
-            )
-            def ln_b_p(b, t, x):
-                T = b.solid_temperature[t, x]
-                ln_b_dry = log(b.b0) + (-b.hoa / constants.gas_constant / T)
-                a = smooth_max(
-                    1e-10, 1 + b.SB_beta * b.adsorbate_loading_equil[t, x, "H2O"]
-                )
-                pres_smooth_max = smooth_max(1e-10, b.pres[t, x, "CO2"], eps=1e-8)
-                return ln_b_dry + log(a) + log(pres_smooth_max)
-
-            @self.Constraint(
-                self.flowsheet().time,
-                self.length_domain,
-                doc="""constraint for log transformed mechanistic isotherm model""",
-            )
-            def ln_qtoth_eq(b, t, x):
-                return 10 * (b.tau[t, x] * b.ln_qtoth[t, x]) == 10 * (
-                    b.tau[t, x] * b.ln_q_inf[t, x]
-                    + b.tau[t, x] * b.ln_b_p[t, x]
-                    - log(1 + exp(b.tau[t, x] * b.ln_b_p[t, x]))
-                )
-
-        @self.Constraint(
-            self.flowsheet().time,
-            self.length_domain,
-            self.adsorbed_components,
-            doc=""""Equilibrium loading based on gas phase composition""",
-        )
-        def isotherm_eqn(b, t, x, j):
-            pres = {}
-            # use external surface mole fractions
-            for i in b.adsorbed_components:
-                pres[i] = (
-                    b.gas_phase.properties[t, x].pressure
-                    * b.mole_frac_comp_surface[t, x, i]
-                )
-            T = b.solid_temperature[t, x]
-
-            # Those constraints seem to help convergence
-            q_h2o = b.adsorbate_loading_equil[t, x, "H2O"]
-            if j == "CO2":
-                if self.config.coadsorption_isotherm == "None":
-                    b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
-                    b_p = b_ * pres[j]
-                    tau = self.tau0 + self.alpha * (1 - self.temperature_ref / T)
-                    return b.adsorbate_loading_equil[t, x, j] == self.q0_inf * b_p / (
-                        1 + b_p**tau
-                    ) ** (1 / tau)
-                else:  # consider co-adsorption effect, need water loading
-                    if self.config.coadsorption_isotherm == "Mechanistic":
-                        fblock = self.MECH_fblock_max * (
-                            1 - exp(-((self.MECH_k * q_h2o) ** self.MECH_n))
-                        )
-                        phi_avialable = 1.0 - fblock
-                        exp_term = exp(-self.MECH_A / q_h2o)
-                        phi = (
-                            self.MECH_phi_dry
-                            + (phi_avialable - self.MECH_phi_dry) * exp_term
-                        )
-                        return b.adsorbate_loading_equil[
-                            t, x, j
-                        ] * self.MECH_phi_dry == phi * exp(b.ln_qtoth[t, x])
-                    elif self.config.coadsorption_isotherm == "WADST":
-                        b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
-                        b_p = b_ * pres[j]
-                        tau = self.tau0 + self.alpha * (1 - self.temperature_ref / T)
-                        q_dry = self.q0_inf * b_p / (1 + b_p**tau) ** (1 / tau)
-                        b_wet = self.WADST_b0_wet * exp(
-                            -self.WADST_hoa_wet / constants.gas_constant / T
-                        )
-                        b_p_wet = b_wet * pres[j]
-                        tau_wet = self.WADST_tau0_wet + self.WADST_alpha_wet * (
-                            1 - self.temperature_ref / T
-                        )
-                        q_wet = (
-                            self.WADST_q0_inf_wet
-                            * b_p_wet
-                            / (1 + b_p_wet**tau_wet) ** (1 / tau_wet)
-                        )
-                        return (
-                            b.adsorbate_loading_equil[t, x, j]
-                            == (1 - exp(-self.WADST_A / q_h2o)) * q_dry
-                            + exp(-self.WADST_A / q_h2o) * q_wet
-                        )
-                    elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
-                        return (
-                            1
-                            * b.adsorbate_loading_equil[t, x, j]
-                            / exp(b.ln_qtoth[t, x])
-                            == 1
-                        )
-                    else:  # invalid configuration
-                        raise BurntToast(
-                            "{} encountered unrecognized argument for "
-                            "CO2-H2O co-adsorption isotherm type. Please contact the IDAES"
-                            " developers with this bug.".format(self.name)
-                        )
-            elif j == "H2O":
-                E1 = self.GAB_C - exp(self.GAB_D * T) * pyunits.J / pyunits.mol
-                E2_9 = self.GAB_F + self.GAB_G * T
-                E10 = self.GAB_A + self.GAB_B * T
-                c = exp((E1 - E10) / constants.gas_constant / T)
-                k = exp((E2_9 - E10) / constants.gas_constant / T)
-                rh = b.RH[t, x]
-                # rh_limit = min(0.95, rh) Note that without limiting this, the
-                # steam sweep will cause rh>1 and the solver will diverge
-                rh_limit = 0.5 * (rh + 0.95 - sqrt((rh - 0.95) * (rh - 0.95) + 1e-10))
-                # rh_limits = max(1, rh_limit)
-                rh_limit2 = 0.5 * (rh_limit + sqrt(rh_limit * rh_limit + 1e-10))
-                kx = k * rh_limit2
-                return (
-                    b.adsorbate_loading_equil[t, x, j] * (1 - kx) * (1 + (c - 1) * kx)
-                    == self.GAB_qm * c * kx
-                )
 
         # Mass transfer term due to adsorption
         if self.config.mass_transfer_coefficient_type == "Fixed":
