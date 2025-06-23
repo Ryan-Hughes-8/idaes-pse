@@ -530,11 +530,12 @@ and used when constructing these
             )
             self.wetted_perimeter.fix()
 
-        self.wall_diameter = Var(
-            initialize=1.0,
-            doc="Reactor wall outside diameter",
+        self.wall_thickness = Var(
+            initialize=0.0254,
+            doc="Reactor wall thickness",
             units=pyunits.m,
         )
+        self.wall_thickness.fix()
 
         self.wall_temperature = Var(
             self.flowsheet().time,
@@ -1934,6 +1935,12 @@ and used when constructing these
                     - b.gas_phase.enthalpy_transfer[t, x]
                     + jheat * b.bed_area
                 )
+
+        @self.Expression(
+            doc="Reactor wall outside diameter",
+        )
+        def wall_diameter(b):
+            return b.bed_diameter + b.wall_thickness
 
         @self.Constraint(
             self.flowsheet().config.time,
