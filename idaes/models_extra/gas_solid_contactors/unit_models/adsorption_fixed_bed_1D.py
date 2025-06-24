@@ -769,7 +769,7 @@ and used when constructing these
 
         if self.config.mass_transfer_coefficient_type == "Macropore":
             self.C1["CO2"] = 1.68e-12
-            self.C1["CO2"] = 3.29e-11
+            self.C1["H2O"] = 3.29e-11
         elif self.config.mass_transfer_coefficient_type == "Arrhenius":
             self.ln_k0_LDF["CO2"] = 9.25
             self.ln_k0_LDF["H2O"] = -3.50656
