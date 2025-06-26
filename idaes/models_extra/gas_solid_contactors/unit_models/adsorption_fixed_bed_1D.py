@@ -999,7 +999,7 @@ and used when constructing these
             )
             def ln_qtoth_eq(b, t, x):
                 return b.tau[t, x] * b.ln_qtoth[t, x] == b.tau[t, x] * log(
-                    self.q0_inf
+                    b.q0_inf
                 ) + b.tau[t, x] * b.ln_b_p[t, x] - log(
                     1 + exp(b.tau[t, x] * b.ln_b_p[t, x])
                 )
@@ -1091,50 +1091,49 @@ and used when constructing these
             # Those constraints seem to help convergence
             q_h2o = b.adsorbate_loading_equil[t, x, "H2O"]
             if j == "CO2":
-                if self.config.coadsorption_isotherm == "None":
-                    b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
+                if b.config.coadsorption_isotherm == "None":
+                    b_ = b.b0 * exp(-b.hoa / constants.gas_constant / T)
                     b_p = b_ * pres[j]
-                    tau = self.tau0 + self.alpha * (1 - self.temperature_ref / T)
-                    return b.adsorbate_loading_equil[t, x, j] == self.q0_inf * b_p / (
+                    tau = b.tau0 + b.alpha * (1 - b.temperature_ref / T)
+                    return b.adsorbate_loading_equil[t, x, j] == b.q0_inf * b_p / (
                         1 + b_p**tau
                     ) ** (1 / tau)
                 else:  # consider co-adsorption effect, need water loading
-                    if self.config.coadsorption_isotherm == "Mechanistic":
-                        fblock = self.MECH_fblock_max * (
-                            1 - exp(-((self.MECH_k * q_h2o) ** self.MECH_n))
+                    if b.config.coadsorption_isotherm == "Mechanistic":
+                        fblock = b.MECH_fblock_max * (
+                            1 - exp(-((b.MECH_k * q_h2o) ** b.MECH_n))
                         )
                         phi_avialable = 1.0 - fblock
-                        exp_term = exp(-self.MECH_A / q_h2o)
+                        exp_term = exp(-b.MECH_A / q_h2o)
                         phi = (
-                            self.MECH_phi_dry
-                            + (phi_avialable - self.MECH_phi_dry) * exp_term
+                            b.MECH_phi_dry + (phi_avialable - b.MECH_phi_dry) * exp_term
                         )
                         return b.adsorbate_loading_equil[
                             t, x, j
-                        ] * self.MECH_phi_dry == phi * exp(b.ln_qtoth[t, x])
-                    elif self.config.coadsorption_isotherm == "WADST":
-                        b_ = self.b0 * exp(-self.hoa / constants.gas_constant / T)
+                        ] * b.MECH_phi_dry == phi * exp(b.ln_qtoth[t, x])
+                    elif b.config.coadsorption_isotherm == "WADST":
+                        b_ = b.b0 * exp(-b.hoa / constants.gas_constant / T)
                         b_p = b_ * pres[j]
-                        tau = self.tau0 + self.alpha * (1 - self.temperature_ref / T)
-                        q_dry = self.q0_inf * b_p / (1 + b_p**tau) ** (1 / tau)
-                        b_wet = self.WADST_b0_wet * exp(
-                            -self.WADST_hoa_wet / constants.gas_constant / T
+                        tau = b.tau0 + b.alpha * (1 - b.temperature_ref / T)
+                        q_dry = b.q0_inf * b_p / (1 + b_p**tau) ** (1 / tau)
+                        b_wet = b.WADST_b0_wet * exp(
+                            -b.WADST_hoa_wet / constants.gas_constant / T
                         )
                         b_p_wet = b_wet * pres[j]
-                        tau_wet = self.WADST_tau0_wet + self.WADST_alpha_wet * (
-                            1 - self.temperature_ref / T
+                        tau_wet = b.WADST_tau0_wet + b.WADST_alpha_wet * (
+                            1 - b.temperature_ref / T
                         )
                         q_wet = (
-                            self.WADST_q0_inf_wet
+                            b.WADST_q0_inf_wet
                             * b_p_wet
                             / (1 + b_p_wet**tau_wet) ** (1 / tau_wet)
                         )
                         return (
                             b.adsorbate_loading_equil[t, x, j]
-                            == (1 - exp(-self.WADST_A / q_h2o)) * q_dry
-                            + exp(-self.WADST_A / q_h2o) * q_wet
+                            == (1 - exp(-b.WADST_A / q_h2o)) * q_dry
+                            + exp(-b.WADST_A / q_h2o) * q_wet
                         )
-                    elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
+                    elif b.config.coadsorption_isotherm == "Stampi-Bombelli":
                         return (
                             1
                             * b.adsorbate_loading_equil[t, x, j]
@@ -1145,12 +1144,12 @@ and used when constructing these
                         raise BurntToast(
                             "{} encountered unrecognized argument for "
                             "CO2-H2O co-adsorption isotherm type. Please contact the IDAES"
-                            " developers with this bug.".format(self.name)
+                            " developers with this bug.".format(b.name)
                         )
             elif j == "H2O":
-                E1 = self.GAB_C - exp(self.GAB_D * T) * pyunits.J / pyunits.mol
-                E2_9 = self.GAB_F + self.GAB_G * T
-                E10 = self.GAB_A + self.GAB_B * T
+                E1 = b.GAB_C - exp(b.GAB_D * T) * pyunits.J / pyunits.mol
+                E2_9 = b.GAB_F + b.GAB_G * T
+                E10 = b.GAB_A + b.GAB_B * T
                 c = exp((E1 - E10) / constants.gas_constant / T)
                 k = exp((E2_9 - E10) / constants.gas_constant / T)
                 rh = b.RH_surf[t, x]
@@ -1162,7 +1161,7 @@ and used when constructing these
                 kx = k * rh_limit2
                 return (
                     b.adsorbate_loading_equil[t, x, j] * (1 - kx) * (1 + (c - 1) * kx)
-                    == self.GAB_qm * c * kx
+                    == b.GAB_qm * c * kx
                 )
 
     def _add_custom_adsorbent(self):
@@ -2062,10 +2061,10 @@ and used when constructing these
                     blk.gas_phase_config_pressure_drop[t, x],
                 )
 
-                calculate_variable_from_constraint(
-                    blk.RH[t, x],
-                    blk.RH_eq[t, x],
-                )
+                # calculate_variable_from_constraint(
+                #     blk.RH[t, x],
+                #     blk.RH_eq[t, x],
+                # )
 
                 if hasattr(blk, "ln_qtoth"):
                     if hasattr(blk, "iso_terms"):
