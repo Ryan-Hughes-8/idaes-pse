@@ -619,16 +619,6 @@ and used when constructing these
             doc="Heat of adsorption [J/mol]",
         )
 
-        # Mass transfer coefficient type
-        self.kf = Var(
-            self.flowsheet().time,
-            self.length_domain,
-            self.adsorbed_components,
-            initialize=0.01,
-            units=1 / pyunits.s,
-            bounds=(1e-20, None),
-            doc="Mass transfer parameter for LDF model",
-        )
         if self.config.mass_transfer_coefficient_type == "Macropore":
             self.C1 = Var(
                 self.adsorbed_components,
@@ -1588,44 +1578,39 @@ and used when constructing these
         # Mass transfer term due to adsorption
         if self.config.mass_transfer_coefficient_type == "Fixed":
 
-            @self.Constraint(
+            @self.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
                 doc="""Constraint for calculating internal mass transfer coefficient""",
             )
-            def kf_eqn(b, t, x, j):
-                return b.kf[t, x, j] == b.k_fixed[j]
+            def kf(b, t, x, j):
+                return b.k_fixed[j]
 
         elif self.config.mass_transfer_coefficient_type == "Macropore":
 
-            @self.Constraint(
+            @self.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
                 doc="""Constraint for calculating internal mass transfer coefficient""",
             )
-            def kf_eqn(b, t, x, j):
+            def kf(b, t, x, j):
                 T = b.solid_temperature[t, x]
                 Deff = b.C1[j] * T**0.5
-                return (
-                    b.kf[t, x, j]
-                    == 15 * b.particle_voidage * Deff / (b.particle_diameter / 2) ** 2
-                )
+                return 15 * b.particle_voidage * Deff / (b.particle_diameter / 2) ** 2
 
         elif self.config.mass_transfer_coefficient_type == "Arrhenius":
 
-            @self.Constraint(
+            @self.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
                 doc="""Constraint for calculating internal mass transfer coefficient""",
             )
-            def kf_eqn(b, t, x, j):
+            def kf(b, t, x, j):
                 T = b.solid_temperature[t, x]
-                return b.kf[t, x, j] == exp(
-                    b.ln_k0_LDF[j] - b.E_LDF[j] / T / constants.gas_constant
-                )
+                return exp(b.ln_k0_LDF[j] - b.E_LDF[j] / T / constants.gas_constant)
 
         else:
             raise BurntToast(
@@ -1656,6 +1641,49 @@ and used when constructing these
                 return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == 0.0
 
         # Mass transfer term due to film diffusion
+        # Particle Sherwood number
+        @self.Expression(
+            self.flowsheet().time,
+            self.length_domain,
+            self.adsorbed_components,
+            doc="Sherwood number",
+        )
+        def Sh_number(b, t, x, i):
+            if self.config.adsorbent_shape == "particle":
+                return (
+                    2.0
+                    + 0.552 * b.Re_number[t, x] ** 0.5 * b.Sc_number[t, x, i] ** 0.3333
+                )
+            else:
+                # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
+                # possible correlations in Rezaei 2009
+                return 3.66
+
+        # film mass transfer coefficient
+        @self.Constraint(
+            self.flowsheet().time,
+            self.length_domain,
+            self.adsorbed_components,
+            doc="Film mass transfer coefficient",
+        )
+        def kc_film_eq(b, t, x, i):
+            if i == "CO2":
+                diffusivity = 1.65e-5 * pyunits.m**2 / pyunits.s
+            elif i == "H2O":
+                diffusivity = 2.6e-5 * pyunits.m**2 / pyunits.s
+            else:
+                diffusivity = 1.5e-5 * pyunits.m**2 / pyunits.s
+            if self.config.adsorbent_shape == "particle":
+                return (
+                    b.kc_film[t, x, i] * b.particle_diameter
+                    == b.Sh_number[t, x, i] * diffusivity
+                )
+            else:
+                return (
+                    b.kc_film[t, x, i] * b.hydraulic_diameter
+                    == b.Sh_number[t, x, i] * diffusivity
+                )
+
         @self.Constraint(
             self.flowsheet().time,
             self.length_domain,
@@ -1754,24 +1782,6 @@ and used when constructing these
                 / diffusivity
             )
 
-        # Particle Sherwood number
-        @self.Expression(
-            self.flowsheet().time,
-            self.length_domain,
-            self.adsorbed_components,
-            doc="Sherwood number",
-        )
-        def Sh_number(b, t, x, i):
-            if self.config.adsorbent_shape == "particle":
-                return (
-                    2.0
-                    + 0.552 * b.Re_number[t, x] ** 0.5 * b.Sc_number[t, x, i] ** 0.3333
-                )
-            else:
-                # for fully developed laminar flow, use constant Nu (Incropera & DeWitt)
-                # possible correlations in Rezaei 2009
-                return 3.66
-
         # Gas-solid heat transfer coefficient
         @self.Constraint(
             self.flowsheet().time,
@@ -1790,31 +1800,6 @@ and used when constructing these
                     b.gas_solid_htc[t, x] * b.hydraulic_diameter
                     == b.Nu_number[t, x]
                     * b.gas_phase.properties[t, x].therm_cond_phase["Vap"]
-                )
-
-        # film mass transfer coefficient
-        @self.Constraint(
-            self.flowsheet().time,
-            self.length_domain,
-            self.adsorbed_components,
-            doc="Film mass transfer coefficient",
-        )
-        def kc_film_eqn(b, t, x, i):
-            if i == "CO2":
-                diffusivity = 1.65e-5 * pyunits.m**2 / pyunits.s
-            elif i == "H2O":
-                diffusivity = 2.6e-5 * pyunits.m**2 / pyunits.s
-            else:
-                diffusivity = 1.5e-5 * pyunits.m**2 / pyunits.s
-            if self.config.adsorbent_shape == "particle":
-                return (
-                    b.kc_film[t, x, i] * b.particle_diameter
-                    == b.Sh_number[t, x, i] * diffusivity
-                )
-            else:
-                return (
-                    b.kc_film[t, x, i] * b.hydraulic_diameter
-                    == b.Sh_number[t, x, i] * diffusivity
                 )
 
         # heat transfer rate from solid phase to gas phase
@@ -1935,7 +1920,7 @@ and used when constructing these
             self.length_domain,
             doc="Wall energy balances",
         )
-        def wall_energy_balances(b, t, x):
+        def wall_energy_balance(b, t, x):
             if self.config.dynamic:
                 return b.wall_temperature_dt[t, x] * b.cp_wall / 4 * (
                     b.wall_diameter**2 - b.bed_diameter**2
@@ -2023,6 +2008,21 @@ and used when constructing these
                     ].component(s)()
                 )
 
+        # initializing additional variables, specific to fixed bed
+        if hasattr(blk, "mole_frac_comp_surface"):
+            for k in blk.adsorbed_components:
+                blk.mole_frac_comp_surface[:, :, k] = blk.gas_inlet.mole_frac_comp[
+                    blk.flowsheet().time.first(), k
+                ]()
+        if hasattr(blk, "solid_temperature"):
+            blk.solid_temperature[:, :] = blk.gas_inlet.temperature[
+                blk.flowsheet().time.first()
+            ]()
+        if hasattr(blk, "wall_temperature"):
+            blk.wall_temperature[:, :] = blk.gas_inlet.temperature[
+                blk.flowsheet().time.first()
+            ]()
+
         # ---------------------------------------------------------------------
         # Initialize gas phase block
         init_log.info("Initialize Gas Phase Block")
@@ -2061,10 +2061,10 @@ and used when constructing these
                     blk.gas_phase_config_pressure_drop[t, x],
                 )
 
-                # calculate_variable_from_constraint(
-                #     blk.RH[t, x],
-                #     blk.RH_eq[t, x],
-                # )
+                calculate_variable_from_constraint(
+                    blk.RH[t, x],
+                    blk.RH_eq[t, x],
+                )
 
                 if hasattr(blk, "ln_qtoth"):
                     if hasattr(blk, "iso_terms"):
@@ -2107,14 +2107,28 @@ and used when constructing these
         init_log.info_high("Fixing Inlet Port States")
         blk.gas_inlet.fix()
         # =================================
+        # deactivate mass transfer
         # fix loading and deactivate solids mass transfer (only adsorbed components)
-
         blk.adsorbate_loading.fix()
         for (t, x, j), v in blk.mass_transfer_eqn.items():
             if j in blk.adsorbed_components:
                 v.deactivate()
 
-        init_log.info("Initialize with fixed loading")
+        # fix surface mole fraction and deactivate film mass transfer
+        # blk.mass_transfer_film_diffusion_eqn.deactivate()
+        # for (t, x, p, j), v in blk.gas_phase.mass_transfer_term.items():
+        #     if j in blk.adsorbed_components:
+        #         v.fix()
+
+        # # deactivate wall energy balance
+        # blk.wall_energy_balance.deactivate()
+        # blk.wall_temperature.fix()
+
+        # # deactivate gas phase heat transfer
+        # blk.gas_phase_heat_transfer.deactivate()
+        # blk.gas_phase.heat.fix(0)
+
+        init_log.info("Initialize with deactivated mass and heat transfer")
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
             results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
         if check_optimal_termination(results):
@@ -2127,7 +2141,7 @@ and used when constructing these
         blk.adsorbate_loading.unfix()
         blk.mass_transfer_eqn.activate()
 
-        init_log.info("Activating loading equations and solving")
+        init_log.info("Activating mass transfer and solving")
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
             results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
         if check_optimal_termination(results):
@@ -2136,6 +2150,24 @@ and used when constructing these
             )
         else:
             _log.warning("{} Initialization Step 3 Failed.".format(blk.name))
+
+        # # deactivate wall energy balance
+        # blk.wall_energy_balance.activate()
+        # blk.wall_temperature.unfix()
+
+        # # deactivate gas phase heat transfer
+        # blk.gas_phase_heat_transfer.activate()
+        # blk.gas_phase.heat.unfix()
+
+        # init_log.info("Activating heat transfer and solving")
+        # with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
+        #     results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
+        # if check_optimal_termination(results):
+        #     init_log.info_high(
+        #         "Initialization Step 4 {}.".format(idaeslog.condition(results))
+        #     )
+        # else:
+        #     _log.warning("{} Initialization Step 4 Failed.".format(blk.name))
 
         # revert port states =========================
         init_log.info_high("Reverting Inlet Port States")
