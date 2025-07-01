@@ -65,6 +65,8 @@ from pyomo.environ import (
     log,
     sqrt,
     units as pyunits,
+    Block,
+    Reference,
 )
 from pyomo.common.config import ConfigValue, In, Bool
 from pyomo.util.calc_var_value import calculate_variable_from_constraint
@@ -96,7 +98,7 @@ from idaes.core.util import scaling as iscale
 from idaes.core.solvers import get_solver
 from idaes.core.util.math import smooth_max
 
-__author__ = "Chinedu Okoli, Anca Ostace, Jinliang Ma"
+__author__ = "Chinedu Okoli, Anca Ostace, Jinliang Ma, Ryan Hughes"
 
 # Set up logger
 _log = idaeslog.getLogger(__name__)
@@ -127,7 +129,7 @@ domain (default=10)""",
         ConfigValue(
             default=[0.0, 1.0],
             domain=list,
-            description="Number of finite elements length domain",
+            description="list of points to included in the length domain",
             doc="""length_domain_set - (optional) list of point to use to
 initialize a new ContinuousSet if length_domain is not
 provided (default = [0.0, 1.0])""",
@@ -517,38 +519,7 @@ and used when constructing these
             units=pyunits.m,
         )
 
-        if (
-            self.config.adsorbent_shape == "monolith"
-            or self.config.adsorbent_shape == "spiral_wound"
-        ):
-            self.hydraulic_diameter = Var(
-                initialize=0.005,
-                doc="hydraulic diameter of adsorbent shape",
-                units=pyunits.m,
-            )
-            self.hydraulic_diameter.fix()
-        else:
-            self.particle_diameter = Var(
-                initialize=2e-3,
-                doc="Particle diameter [m]",
-                units=pyunits.m,
-            )
-            self.particle_diameter.fix()
-
-        if self.config.adsorbent_shape == "spiral_wound":
-            self.core_diameter = Var(
-                initialize=0.00635,
-                doc="diameter of center core in spiral wound module",
-                units=pyunits.m,
-            )
-            self.core_diameter.fix()
-
-            self.wetted_perimeter = Var(
-                initialize=1,
-                doc="wetted perimeter of spiral wound module",
-                units=pyunits.m,
-            )
-            self.wetted_perimeter.fix()
+        self.adsorbed_components = Set(initialize=self.config.adsorbed_components)
 
         self.wall_thickness = Var(
             initialize=0.0254,
@@ -582,80 +553,6 @@ and used when constructing these
             doc="Cooling or heating fluid temperature",
         )
 
-        # Add required adsorbent parameters (not dependant on specific adsorbent, initial values based on Lewatit)
-        self.adsorbed_components = Set(initialize=self.config.adsorbed_components)
-        cp_mol_comp_adsorbate_dict = {"CO2": 36.61, "H2O": 33.59, "N2": 29.12}
-        self.cp_mol_comp_adsorbate = Param(
-            self.adsorbed_components,
-            initialize={
-                k: cp_mol_comp_adsorbate_dict[k] for k in self.adsorbed_components
-            },
-            units=pyunits.J / pyunits.mol / pyunits.K,
-            doc="Heat capacity of adsorbate at 298.15 K",
-        )
-        self.bed_voidage = Param(
-            initialize=0.4,
-            units=pyunits.dimensionless,
-            doc="Bed voidage - external or interparticle porosity [-]",
-        )
-        self.adsorbent_voidage = Param(
-            initialize=0.238,
-            units=pyunits.dimensionless,
-            doc="Adsorbent structure voidage (ex. particle voidage) - internal or intrasolid porosity [-]",
-        )
-        self.cp_mass_param = Param(
-            initialize=1580,
-            units=pyunits.J / pyunits.kg / pyunits.K,
-            doc="Heat capacity of adsorbent [J/kg/K]",
-        )
-        self.skeletal_dens = Param(
-            initialize=1155,
-            units=pyunits.kg / pyunits.m**3,
-            doc="Skeletal density of adsorbent material (without pores) [kg/m3]",
-        )
-        self.dh_ads = Param(
-            self.adsorbed_components,
-            units=pyunits.J / pyunits.mol,
-            doc="Heat of adsorption [J/mol]",
-        )
-
-        if self.config.mass_transfer_coefficient_type == "Macropore":
-            self.C1 = Var(
-                self.adsorbed_components,
-                initialize=1e-12,
-                units=pyunits.m**2 * pyunits.K**-0.5 * pyunits.seconds**-1,
-                bounds=(1e-13, 1e-10),
-                doc="Lumped parameter for macropore mass transfer coefficient calculation",
-            )
-            self.C1.fix()
-        elif self.config.mass_transfer_coefficient_type == "Arrhenius":
-
-            self.ln_k0_LDF = Var(
-                self.adsorbed_components,
-                initialize=0,
-                units=pyunits.dimensionless,  # for k = 1/s
-                bounds=(None, None),
-                doc="ln(k0) for Arrhenius LDF coefficient",
-            )
-            self.ln_k0_LDF.fix()
-            self.E_LDF = Var(
-                self.adsorbed_components,
-                initialize=38870,
-                units=pyunits.J / pyunits.mol,  # for k = 1/s
-                bounds=(0, 200000),
-                doc="E for Arrhenius LDF coefficient",
-            )
-            self.E_LDF.fix()
-        elif self.config.mass_transfer_coefficient_type == "Fixed":
-            self.k_fixed = Var(
-                self.adsorbed_components,
-                initialize=0.001,
-                units=pyunits.seconds**-1,
-                bounds=(1e-20, 100),
-                doc="fixed mass transfer coefficient parameter",
-            )
-            self.k_fixed.fix()
-
         self.heat_transfer_coeff_gas_wall = Param(
             initialize=35.5,
             mutable=True,
@@ -684,6 +581,116 @@ and used when constructing these
             doc="Heat capacity of wall material [J/kg/K]",
         )
 
+        # create a solid phase block to store solid phase variables and constraints. Useful for organization and initialization
+        self.solid_phase = Block()
+
+        self.solid_phase.bed_voidage = Param(
+            initialize=0.4,
+            units=pyunits.dimensionless,
+            doc="Bed voidage - external or interparticle porosity [-]",
+        )
+
+        if (
+            self.config.adsorbent_shape == "monolith"
+            or self.config.adsorbent_shape == "spiral_wound"
+        ):
+            self.solid_phase.hydraulic_diameter = Var(
+                initialize=0.005,
+                doc="hydraulic diameter of adsorbent shape",
+                units=pyunits.m,
+            )
+            self.solid_phase.hydraulic_diameter.fix()
+        else:
+            self.solid_phase.particle_diameter = Var(
+                initialize=2e-3,
+                doc="Particle diameter [m]",
+                units=pyunits.m,
+            )
+            self.solid_phase.particle_diameter.fix()
+
+        if self.config.adsorbent_shape == "spiral_wound":
+            self.solid_phase.core_diameter = Var(
+                initialize=0.00635,
+                doc="diameter of center core in spiral wound module",
+                units=pyunits.m,
+            )
+            self.solid_phase.core_diameter.fix()
+
+            self.solid_phase.wetted_perimeter = Var(
+                initialize=1,
+                doc="wetted perimeter of spiral wound module",
+                units=pyunits.m,
+            )
+            self.solid_phase.wetted_perimeter.fix()
+
+        # Add required adsorbent parameters (not dependant on specific adsorbent, initial values based on Lewatit)
+        cp_mol_comp_adsorbate_dict = {"CO2": 36.61, "H2O": 33.59, "N2": 29.12}
+        self.solid_phase.cp_mol_comp_adsorbate = Param(
+            self.adsorbed_components,
+            initialize={
+                k: cp_mol_comp_adsorbate_dict[k] for k in self.adsorbed_components
+            },
+            units=pyunits.J / pyunits.mol / pyunits.K,
+            doc="Heat capacity of adsorbate at 298.15 K",
+        )
+        self.solid_phase.adsorbent_voidage = Param(
+            initialize=0.238,
+            units=pyunits.dimensionless,
+            doc="Adsorbent structure voidage (ex. particle voidage) - internal or intrasolid porosity [-]",
+        )
+        self.solid_phase.cp_mass_param = Param(
+            initialize=1580,
+            units=pyunits.J / pyunits.kg / pyunits.K,
+            doc="Heat capacity of adsorbent [J/kg/K]",
+        )
+        self.solid_phase.skeletal_dens = Param(
+            initialize=1155,
+            units=pyunits.kg / pyunits.m**3,
+            doc="Skeletal density of adsorbent material (without pores) [kg/m3]",
+        )
+        self.solid_phase.dh_ads = Param(
+            self.adsorbed_components,
+            units=pyunits.J / pyunits.mol,
+            doc="Heat of adsorption [J/mol]",
+        )
+
+        if self.config.mass_transfer_coefficient_type == "Macropore":
+            self.solid_phase.C1 = Var(
+                self.adsorbed_components,
+                initialize=1e-12,
+                units=pyunits.m**2 * pyunits.K**-0.5 * pyunits.seconds**-1,
+                bounds=(1e-13, 1e-10),
+                doc="Lumped parameter for macropore mass transfer coefficient calculation",
+            )
+            self.solid_phase.C1.fix()
+        elif self.config.mass_transfer_coefficient_type == "Arrhenius":
+
+            self.solid_phase.ln_k0_LDF = Var(
+                self.adsorbed_components,
+                initialize=0,
+                units=pyunits.dimensionless,  # for k = 1/s
+                bounds=(None, None),
+                doc="ln(k0) for Arrhenius LDF coefficient",
+            )
+            self.solid_phase.ln_k0_LDF.fix()
+            self.solid_phase.E_LDF = Var(
+                self.adsorbed_components,
+                initialize=38870,
+                units=pyunits.J / pyunits.mol,  # for k = 1/s
+                bounds=(0, 200000),
+                doc="E for Arrhenius LDF coefficient",
+            )
+            self.solid_phase.E_LDF.fix()
+        elif self.config.mass_transfer_coefficient_type == "Fixed":
+            self.solid_phase.k_fixed = Var(
+                self.adsorbed_components,
+                initialize=0.001,
+                units=pyunits.seconds**-1,
+                bounds=(1e-20, 100),
+                doc="fixed mass transfer coefficient parameter",
+            )
+            self.solid_phase.k_fixed.fix()
+
         # =====================================================================
         # Build control volume 1D for gas phase and populate gas control volume
 
@@ -694,7 +701,7 @@ and used when constructing these
             collocation_points=self.config.collocation_points,
             dynamic=self.config.dynamic,
             has_holdup=True,
-            area_definition=DistributedVars.variant,
+            area_definition=DistributedVars.uniform,
             property_package=self.config.property_package,
             property_package_args=self.config.property_package_args,
         )
@@ -761,174 +768,174 @@ and used when constructing these
 
         """
         # update sorbent parameters for lewatit =====================
-        self.bed_voidage = 0.4
-        self.adsorbent_voidage = 0.238
-        self.cp_mass_param = 1580
-        self.skeletal_dens = 1155
-        self.dh_ads["CO2"] = -70000
-        self.dh_ads["H2O"] = -46000
+        self.solid_phase.bed_voidage = 0.4
+        self.solid_phase.adsorbent_voidage = 0.238
+        self.solid_phase.cp_mass_param = 1580
+        self.solid_phase.skeletal_dens = 1155
+        self.solid_phase.dh_ads["CO2"] = -70000
+        self.solid_phase.dh_ads["H2O"] = -46000
 
         if self.config.mass_transfer_coefficient_type == "Macropore":
-            self.C1["CO2"] = 1.68e-12
-            self.C1["H2O"] = 3.29e-11
+            self.solid_phase.C1["CO2"] = 1.68e-12
+            self.solid_phase.C1["H2O"] = 3.29e-11
         elif self.config.mass_transfer_coefficient_type == "Arrhenius":
-            self.ln_k0_LDF["CO2"] = 9.25
-            self.ln_k0_LDF["H2O"] = -3.50656
-            self.E_LDF["CO2"] = 38870
-            self.E_LDF["H2O"] = 0
+            self.solid_phase.ln_k0_LDF["CO2"] = 9.25
+            self.solid_phase.ln_k0_LDF["H2O"] = -3.50656
+            self.solid_phase.E_LDF["CO2"] = 38870
+            self.solid_phase.E_LDF["H2O"] = 0
 
         # add isotherm parameters ================================
-        self.temperature_ref = Param(
+        self.solid_phase.temperature_ref = Param(
             initialize=298.15, units=pyunits.K, doc="Reference temperature [K]"
         )
-        self.q0_inf = Param(
+        self.solid_phase.q0_inf = Param(
             initialize=4.86,
             units=pyunits.mol / pyunits.kg,
             doc="Isotherm parameter based on single species isotherm [mol/kg]",
             mutable=True,
         )
-        self.X = Param(
+        self.solid_phase.X = Param(
             initialize=0,
             units=pyunits.dimensionless,
             doc="Isotherm parameter based on single species isotherm [mol/kg]",
             mutable=True,
         )
-        self.b0 = Param(
+        self.solid_phase.b0 = Param(
             initialize=2.85e-21,
             units=pyunits.Pa**-1,
             doc="Isotherm parameter based on single species isotherm [Pa-1]",
             mutable=True,
         )
-        self.tau0 = Param(
+        self.solid_phase.tau0 = Param(
             initialize=0.209,
             doc="Isotherm parameter based on single species isotherm [-]",
             mutable=True,
         )
-        self.alpha = Param(
+        self.solid_phase.alpha = Param(
             initialize=0.523,
             doc="Isotherm parameter based on single species isotherm [-]",
             mutable=True,
         )
-        self.hoa = Param(
+        self.solid_phase.hoa = Param(
             initialize=-117798,
             units=pyunits.J / pyunits.mol,
             doc="Isotherm parameter isosteric heat of adsorption based on single species isotherm [J/mol]",
             mutable=True,
         )
         # parameters for Guggenheim-Anderson-deBoer (GAB) model
-        self.GAB_qm = Param(
+        self.solid_phase.GAB_qm = Param(
             initialize=3.63,
             units=pyunits.mol / pyunits.kg,
             doc="GAB model monolayer loading [mol/kg]",
             mutable=True,
         )
-        self.GAB_C = Param(
+        self.solid_phase.GAB_C = Param(
             initialize=47110.0,
             units=pyunits.J / pyunits.mol,
             doc="GAB model parameter C for E1=C-exp(DT) [J/mol]",
             mutable=True,
         )
-        self.GAB_D = Param(
+        self.solid_phase.GAB_D = Param(
             initialize=0.023744,
             units=1 / pyunits.K,
             doc="GAB model parameter D for E1=C-exp(DT) [1/K]",
             mutable=True,
         )
-        self.GAB_F = Param(
+        self.solid_phase.GAB_F = Param(
             initialize=57706.0,
             units=pyunits.J / pyunits.mol,
             doc="GAB model parameter F for E2_9=F+GT [J/mol]",
             mutable=True,
         )
-        self.GAB_G = Param(
+        self.solid_phase.GAB_G = Param(
             initialize=-47.814,
             units=pyunits.J / pyunits.mol / pyunits.K,
             doc="GAB model parameter G for E2_9=F+GT [J/mol/K]",
             mutable=True,
         )
-        self.GAB_A = Param(
+        self.solid_phase.GAB_A = Param(
             initialize=57220.0,
             units=pyunits.J / pyunits.mol,
             doc="GAB model parameter A for E10=A+BT [J/mol]",
         )
-        self.GAB_B = Param(
+        self.solid_phase.GAB_B = Param(
             initialize=-44.38,
             units=pyunits.J / pyunits.mol / pyunits.K,
             doc="GAB model parameter B for E10=A+BT [J/mol/K]",
         )
 
         if self.config.coadsorption_isotherm == "WADST":
-            self.WADST_A = Param(
+            self.solid_phase.WADST_A = Param(
                 initialize=1.532,
                 units=pyunits.mol / pyunits.kg,
                 doc="WADST model parameter A [mol/kg]",
             )
-            self.WADST_b0_wet = Param(
+            self.solid_phase.WADST_b0_wet = Param(
                 initialize=1.23e-18,
                 units=1 / pyunits.Pa,
                 doc="WADST model parameter b0_wet [1/Pa]",
             )
-            self.WADST_q0_inf_wet = Param(
+            self.solid_phase.WADST_q0_inf_wet = Param(
                 initialize=9.035,
                 units=pyunits.mol / pyunits.kg,
                 doc="WADST model parameter q0_inf_wet [mol/kg]",
             )
-            self.WADST_tau0_wet = Param(
+            self.solid_phase.WADST_tau0_wet = Param(
                 initialize=0.053, doc="WADST model parameter tau0_wet [-]"
             )
-            self.WADST_alpha_wet = Param(
+            self.solid_phase.WADST_alpha_wet = Param(
                 initialize=0.053, doc="WADST model parameter alpha_wet [-]"
             )
-            self.WADST_hoa_wet = Param(
+            self.solid_phase.WADST_hoa_wet = Param(
                 initialize=-203687.0,
                 units=pyunits.J / pyunits.mol,
                 doc="WADST model parameter heat of adsorption for wet case [J/mol]",
             )
         elif self.config.coadsorption_isotherm == "Mechanistic":
-            self.MECH_fblock_max = Param(
+            self.solid_phase.MECH_fblock_max = Param(
                 initialize=0.433,
                 doc="Mechanistic model parameter maximum block fraction [-]",
             )
-            self.MECH_k = Param(
+            self.solid_phase.MECH_k = Param(
                 initialize=0.795,
                 units=pyunits.kg / pyunits.mol,
                 doc="Mechanistic model parameter k [kg/mol]",
             )
-            self.MECH_phi_dry = Param(
+            self.solid_phase.MECH_phi_dry = Param(
                 initialize=1, doc="Mechanistic model parameter phi in dry case [-]"
             )
-            self.MECH_A = Param(
+            self.solid_phase.MECH_A = Param(
                 initialize=1.535,
                 units=pyunits.mol / pyunits.kg,
                 doc="Mechanistic model parameter A [mol/kg]",
             )
-            self.MECH_hoa_wet = Param(
+            self.solid_phase.MECH_hoa_wet = Param(
                 initialize=-130155.0,
                 units=pyunits.J / pyunits.mol,
                 doc="Mechanistic model parameter heat of adsorption for wet case [J/mol]",
             )
-            self.MECH_n = Param(
+            self.solid_phase.MECH_n = Param(
                 initialize=1.425, doc="Mechanistic model parameter n [-]"
             )
         elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
-            self.SB_gamma = Var(
+            self.solid_phase.SB_gamma = Var(
                 initialize=-0.137,
                 units=pyunits.kg / pyunits.mol,
                 bounds=(-1, 0.2),
                 doc="Stampi-Bomblli model parameter gamma [kg/mol]",
             )
-            self.SB_gamma.fix()
-            self.SB_beta = Var(
+            self.solid_phase.SB_gamma.fix()
+            self.solid_phase.SB_beta = Var(
                 initialize=5.612,
                 units=pyunits.kg / pyunits.mol,
                 bounds=(-0.1, 25),
                 doc="Stampi-Bomblli model parameter beta [kg/mol]",
             )
-            self.SB_beta.fix()
+            self.solid_phase.SB_beta.fix()
 
         # isotherm equations ============================================
         if self.config.coadsorption_isotherm == "Mechanistic":
-            self.ln_qtoth = Var(
+            self.solid_phase.ln_qtoth = Var(
                 self.flowsheet().time,
                 self.length_domain,
                 initialize=0,
@@ -937,16 +944,16 @@ and used when constructing these
                 units=None,
             )
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 doc="tau for mechansitic lewatit model",
             )
             def tau(b, t, x):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
@@ -958,13 +965,13 @@ and used when constructing these
                     * b.mole_frac_comp_surface[t, x, j]
                 )
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 doc="term in log transformed mechanistic isotherm equation, ln(b*p)",
             )
             def ln_b_p(b, t, x):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 exp_term = exp(-b.MECH_A / b.adsorbate_loading_equil[t, x, "H2O"])
                 hoa_ave = (1 - exp_term) * b.hoa + exp_term * b.MECH_hoa_wet
                 # smooth max of (pmin,pres)
@@ -982,7 +989,7 @@ and used when constructing these
                     + log(pres_smooth_max)
                 )
 
-            @self.Constraint(
+            @self.solid_phase.Constraint(
                 self.flowsheet().time,
                 self.length_domain,
                 doc="""constraint for log transformed mechanistic isotherm model""",
@@ -995,7 +1002,7 @@ and used when constructing these
                 )
 
         elif self.config.coadsorption_isotherm == "Stampi-Bombelli":
-            self.ln_qtoth = Var(
+            self.solid_phase.ln_qtoth = Var(
                 self.flowsheet().time,
                 self.length_domain,
                 initialize=0,
@@ -1004,53 +1011,55 @@ and used when constructing these
                 units=None,
             )
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 doc="temperature dependency of q_inf, ln transformed",
             )
             def ln_q_inf(b, t, x):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 ln_q_inf_dry = log(b.q0_inf) + b.X * (1 - b.temperature_ref / T)
                 a = smooth_max(
                     1e-10, 1 - b.SB_gamma * b.adsorbate_loading_equil[t, x, "H2O"]
                 )
                 return ln_q_inf_dry - log(a)
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time, self.length_domain, doc="tau for toth model"
             )
             def tau(b, t, x):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 return b.tau0 + b.alpha * (1 - b.temperature_ref / T)
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
                 doc="component partial pressure used in isotherm equations",
             )
-            def pres(b, t, x, j):
+            def partial_pres_comp(b, t, x, j):
                 return (
-                    b.gas_phase.properties[t, x].pressure
-                    * b.mole_frac_comp_surface[t, x, j]
+                    b.parent_block().gas_phase.properties[t, x].pressure
+                    * b.parent_block().mole_frac_comp_surface[t, x, j]
                 )
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 doc="term in log transformed SB isotherm equation, ln(b*p)",
             )
             def ln_b_p(b, t, x):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 ln_b_dry = log(b.b0) + (-b.hoa / constants.gas_constant / T)
                 a = smooth_max(
                     1e-10, 1 + b.SB_beta * b.adsorbate_loading_equil[t, x, "H2O"]
                 )
-                pres_smooth_max = smooth_max(1e-10, b.pres[t, x, "CO2"], eps=1e-8)
+                pres_smooth_max = smooth_max(
+                    1e-10, b.partial_pres_comp[t, x, "CO2"], eps=1e-8
+                )
                 return ln_b_dry + log(a) + log(pres_smooth_max)
 
-            @self.Constraint(
+            @self.solid_phase.Constraint(
                 self.flowsheet().time,
                 self.length_domain,
                 doc="""constraint for log transformed mechanistic isotherm model""",
@@ -1062,34 +1071,27 @@ and used when constructing these
                     - log(1 + exp(b.tau[t, x] * b.ln_b_p[t, x]))
                 )
 
-        @self.Constraint(
+        @self.solid_phase.Constraint(
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
             doc=""""Equilibrium loading based on gas phase composition""",
         )
         def isotherm_eqn(b, t, x, j):
-            pres = {}
-            # use external surface mole fractions
-            for i in b.adsorbed_components:
-                pres[i] = (
-                    b.gas_phase.properties[t, x].pressure
-                    * b.mole_frac_comp_surface[t, x, i]
-                )
-            T = b.solid_temperature[t, x]
+            T = b.temperature[t, x]
 
             # Those constraints seem to help convergence
             q_h2o = b.adsorbate_loading_equil[t, x, "H2O"]
             if j == "CO2":
-                if b.config.coadsorption_isotherm == "None":
+                if b.parent_block().config.coadsorption_isotherm == "None":
                     b_ = b.b0 * exp(-b.hoa / constants.gas_constant / T)
-                    b_p = b_ * pres[j]
+                    b_p = b_ * b.partial_pres_comp[t, x, j]
                     tau = b.tau0 + b.alpha * (1 - b.temperature_ref / T)
                     return b.adsorbate_loading_equil[t, x, j] == b.q0_inf * b_p / (
                         1 + b_p**tau
                     ) ** (1 / tau)
                 else:  # consider co-adsorption effect, need water loading
-                    if b.config.coadsorption_isotherm == "Mechanistic":
+                    if b.parent_block().config.coadsorption_isotherm == "Mechanistic":
                         fblock = b.MECH_fblock_max * (
                             1 - exp(-((b.MECH_k * q_h2o) ** b.MECH_n))
                         )
@@ -1101,15 +1103,15 @@ and used when constructing these
                         return b.adsorbate_loading_equil[
                             t, x, j
                         ] * b.MECH_phi_dry == phi * exp(b.ln_qtoth[t, x])
-                    elif b.config.coadsorption_isotherm == "WADST":
+                    elif b.parent_block().config.coadsorption_isotherm == "WADST":
                         b_ = b.b0 * exp(-b.hoa / constants.gas_constant / T)
-                        b_p = b_ * pres[j]
+                        b_p = b_ * b.partial_pres_comp[t, x, j]
                         tau = b.tau0 + b.alpha * (1 - b.temperature_ref / T)
                         q_dry = b.q0_inf * b_p / (1 + b_p**tau) ** (1 / tau)
                         b_wet = b.WADST_b0_wet * exp(
                             -b.WADST_hoa_wet / constants.gas_constant / T
                         )
-                        b_p_wet = b_wet * pres[j]
+                        b_p_wet = b_wet * b.partial_pres_comp[t, x, j]
                         tau_wet = b.WADST_tau0_wet + b.WADST_alpha_wet * (
                             1 - b.temperature_ref / T
                         )
@@ -1123,12 +1125,15 @@ and used when constructing these
                             == (1 - exp(-b.WADST_A / q_h2o)) * q_dry
                             + exp(-b.WADST_A / q_h2o) * q_wet
                         )
-                    elif b.config.coadsorption_isotherm == "Stampi-Bombelli":
+                    elif (
+                        b.parent_block().config.coadsorption_isotherm
+                        == "Stampi-Bombelli"
+                    ):
                         return (
-                            1
+                            10
                             * b.adsorbate_loading_equil[t, x, j]
                             / exp(b.ln_qtoth[t, x])
-                            == 1
+                            == 10
                         )
                     else:  # invalid configuration
                         raise BurntToast(
@@ -1142,12 +1147,12 @@ and used when constructing these
                 E10 = b.GAB_A + b.GAB_B * T
                 c = exp((E1 - E10) / constants.gas_constant / T)
                 k = exp((E2_9 - E10) / constants.gas_constant / T)
-                rh = b.RH_surf[t, x]
+                rh = b.parent_block().RH_surf[t, x]
                 # rh_limit = min(0.95, rh) Note that without limiting this, the
                 # steam sweep will cause rh>1 and the solver will diverge
                 rh_limit = 0.5 * (rh + 0.95 - sqrt((rh - 0.95) * (rh - 0.95) + 1e-10))
                 # rh_limits = max(1, rh_limit)
-                rh_limit2 = 0.5 * (rh_limit + sqrt(rh_limit * rh_limit + 1e-10))
+                rh_limit2 = 0.5 * (rh_limit + sqrt(rh_limit**2 + 1e-10))
                 kx = k * rh_limit2
                 return (
                     b.adsorbate_loading_equil[t, x, j] * (1 - kx) * (1 + (c - 1) * kx)
@@ -1297,9 +1302,10 @@ and used when constructing these
             units=pyunits.W / pyunits.m,
         )
 
+        # solid phase variables
         # Joule heating rate W/m^3 if Joule heating is considered
         if self.config.has_joule_heating:
-            self.joule_heating_rate = Var(
+            self.solid_phase.joule_heating_rate = Var(
                 self.flowsheet().time,
                 self.length_domain,
                 initialize=0,
@@ -1307,7 +1313,7 @@ and used when constructing these
                 units=pyunits.W / pyunits.m**3,
             )
 
-        self.solid_temperature = Var(
+        self.solid_phase.temperature = Var(
             self.flowsheet().time,
             self.length_domain,
             domain=PositiveReals,
@@ -1317,7 +1323,7 @@ and used when constructing these
             units=pyunits.K,
         )
 
-        self.adsorbate_loading = Var(
+        self.solid_phase.adsorbate_loading = Var(
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
@@ -1328,7 +1334,7 @@ and used when constructing these
             units=pyunits.mol / pyunits.kg,
         )
 
-        self.adsorbate_loading_equil = Var(
+        self.solid_phase.adsorbate_loading_equil = Var(
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
@@ -1339,7 +1345,7 @@ and used when constructing these
             units=pyunits.mol / pyunits.kg,
         )
 
-        self.adsorbate_holdup = Var(
+        self.solid_phase.adsorbate_holdup = Var(
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
@@ -1350,7 +1356,7 @@ and used when constructing these
             units=pyunits.mol / pyunits.m,
         )
 
-        self.solid_energy_holdup = Var(
+        self.solid_phase.solid_energy_holdup = Var(
             self.flowsheet().time,
             self.length_domain,
             initialize=1,
@@ -1359,15 +1365,15 @@ and used when constructing these
         )
 
         if self.config.dynamic:
-            self.adsorbate_accumulation = DerivativeVar(
-                self.adsorbate_holdup,
+            self.solid_phase.adsorbate_accumulation = DerivativeVar(
+                self.solid_phase.adsorbate_holdup,
                 wrt=self.flowsheet().config.time,
                 doc="Adsorbate accumulation per unit length",
                 units=pyunits.mol / pyunits.m / pyunits.s,
             )
 
-            self.solid_energy_accumulation = DerivativeVar(
-                self.solid_energy_holdup,
+            self.solid_phase.solid_energy_accumulation = DerivativeVar(
+                self.solid_phase.solid_energy_holdup,
                 initialize=0,
                 wrt=self.flowsheet().config.time,
                 doc="Solid energy accumulation",
@@ -1387,7 +1393,7 @@ and used when constructing these
                 return (
                     b.bed_area
                     == (constants.pi * (0.5 * b.bed_diameter) ** 2)
-                    - constants.pi * (0.5 * b.core_diameter) ** 2
+                    - constants.pi * (0.5 * b.solid_phase.core_diameter) ** 2
                 )
             else:
                 return b.bed_area == (constants.pi * (0.5 * b.bed_diameter) ** 2)
@@ -1395,28 +1401,43 @@ and used when constructing these
         @self.Expression(doc="Wet surface area per unit reactor length")
         def wet_surface_area_per_length(b):
             if self.config.adsorbent_shape == "monolith":
-                return 4 * b.bed_area * b.bed_voidage / b.hydraulic_diameter
+                return (
+                    4
+                    * b.bed_area
+                    * b.solid_phase.bed_voidage
+                    / b.solid_phase.hydraulic_diameter
+                )
             elif self.config.adsorbent_shape == "spiral_wound":
-                return b.wetted_perimeter - constants.pi * b.core_diameter
+                return (
+                    b.solid_phase.wetted_perimeter
+                    - constants.pi * b.solid_phase.core_diameter
+                )
             else:
-                return 6 * b.bed_area * (1 - b.bed_voidage) / b.particle_diameter
+                return (
+                    6
+                    * b.bed_area
+                    * (1 - b.solid_phase.bed_voidage)
+                    / b.solid_phase.particle_diameter
+                )
 
         # Area of gas side, and solid side
-        @self.Constraint(self.flowsheet().time, self.length_domain, doc="Gas side area")
-        def gas_phase_area_constraint(b, t, x):
-            return b.gas_phase.area[t, x] == b.bed_area * b.bed_voidage
+        @self.Constraint(doc="Gas side area")
+        def gas_phase_area_constraint(b):
+            return b.gas_phase.area == b.bed_area * b.solid_phase.bed_voidage
 
-        @self.Expression(doc="adsorbent structure/solid density (kg/m^3 solid)")
+        @self.solid_phase.Expression(
+            doc="adsorbent structure/solid density (kg/m^3 solid)"
+        )
         def adsorbent_dens(b):
             return b.skeletal_dens * (1.0 - b.adsorbent_voidage)
 
-        @self.Expression(doc="Bulk density (kg/m^3 bed)")
+        @self.solid_phase.Expression(doc="Bulk density (kg/m^3 bed)")
         def bulk_dens(b):
             return b.adsorbent_dens * (1.0 - b.bed_voidage)
 
-        @self.Expression(doc="Solid phase area")
-        def solid_phase_area(b):
-            return b.bed_area * (1.0 - b.bed_voidage)
+        @self.solid_phase.Expression(doc="Solid phase area")
+        def area(b):
+            return b.parent_block().bed_area * (1.0 - b.bed_voidage)
 
         # ---------------------------------------------------------------------
         # Hydrodynamic constraints
@@ -1439,7 +1460,7 @@ and used when constructing these
             doc="Gas phase interstitial velocity",
         )
         def velocity_gas_phase(b, t, x):
-            return b.velocity_superficial_gas[t, x] / b.bed_voidage
+            return b.velocity_superficial_gas[t, x] / b.solid_phase.bed_voidage
 
         # Gas side pressure drop calculation
         if self.config.has_pressure_change:
@@ -1455,7 +1476,7 @@ and used when constructing these
                     return (
                         b.gas_phase.deltaP[t, x]
                         * b.Re_number[t, x]
-                        * b.hydraulic_diameter
+                        * b.solid_phase.hydraulic_diameter
                         == -32
                         * b.gas_phase.properties[t, x].dens_mass
                         * b.velocity_gas_phase[t, x] ** 2
@@ -1470,7 +1491,7 @@ and used when constructing these
                 )
                 def gas_phase_config_pressure_drop(b, t, x):
                     return (
-                        b.gas_phase.deltaP[t, x] * b.hydraulic_diameter**2
+                        b.gas_phase.deltaP[t, x] * b.solid_phase.hydraulic_diameter**2
                         == -32
                         * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
                         * b.velocity_gas_phase[t, x]
@@ -1489,7 +1510,7 @@ and used when constructing these
                         return b.gas_phase.deltaP[t, x] == -(
                             0.2 / pyunits.s
                         ) * b.velocity_superficial_gas[t, x] * (
-                            b.skeletal_dens,
+                            b.solid_phase.skeletal_dens,
                             -b.gas_phase.properties[t, x].dens_mass,
                         )
 
@@ -1502,14 +1523,14 @@ and used when constructing these
                     )
                     def gas_phase_config_pressure_drop(b, t, x):
                         return -b.gas_phase.deltaP[t, x] == (
-                            1 - b.bed_voidage
-                        ) / b.bed_voidage**3 * b.velocity_superficial_gas[
+                            1 - b.solid_phase.bed_voidage
+                        ) / b.solid_phase.bed_voidage**3 * b.velocity_superficial_gas[
                             t, x
-                        ] / b.particle_diameter * (
+                        ] / b.solid_phase.particle_diameter * (
                             150
-                            * (1 - b.bed_voidage)
+                            * (1 - b.solid_phase.bed_voidage)
                             * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
-                            / b.particle_diameter
+                            / b.solid_phase.particle_diameter
                             + 1.75
                             * b.gas_phase.properties[t, x].dens_mass
                             * b.velocity_superficial_gas[t, x]
@@ -1578,7 +1599,7 @@ and used when constructing these
         # Mass transfer term due to adsorption
         if self.config.mass_transfer_coefficient_type == "Fixed":
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
@@ -1589,27 +1610,27 @@ and used when constructing these
 
         elif self.config.mass_transfer_coefficient_type == "Macropore":
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
                 doc="""Constraint for calculating internal mass transfer coefficient""",
             )
             def kf(b, t, x, j):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 Deff = b.C1[j] * T**0.5
                 return 15 * b.particle_voidage * Deff / (b.particle_diameter / 2) ** 2
 
         elif self.config.mass_transfer_coefficient_type == "Arrhenius":
 
-            @self.Expression(
+            @self.solid_phase.Expression(
                 self.flowsheet().time,
                 self.length_domain,
                 self.adsorbed_components,
                 doc="""Constraint for calculating internal mass transfer coefficient""",
             )
             def kf(b, t, x, j):
-                T = b.solid_temperature[t, x]
+                T = b.temperature[t, x]
                 return exp(b.ln_k0_LDF[j] - b.E_LDF[j] / T / constants.gas_constant)
 
         else:
@@ -1619,28 +1640,22 @@ and used when constructing these
                 " developers with this bug.".format(self.name)
             )
 
-        @self.Constraint(
+        @self.solid_phase.Constraint(
             self.flowsheet().time,
             self.length_domain,
-            self.config.property_package.component_list,
+            self.adsorbed_components,
             doc=""""Adsoption of the gas phase components onto 
                 the solid phase modeled using the LDF model""",
         )
         def mass_transfer_eqn(b, t, x, j):
-            if j in b.adsorbed_components:
-                return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == -(
-                    b.kf[t, x, j]
-                    * (
-                        b.adsorbate_loading_equil[t, x, j]
-                        - b.adsorbate_loading[t, x, j]
-                    )
-                    * b.solid_phase_area
-                    * b.adsorbent_dens
-                )
-            else:
-                return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == 0.0
+            return b.parent_block().gas_phase.mass_transfer_term[t, x, "Vap", j] == -(
+                b.kf[t, x, j]
+                * (b.adsorbate_loading_equil[t, x, j] - b.adsorbate_loading[t, x, j])
+                * b.area
+                * b.adsorbent_dens
+            )
 
-        # Mass transfer term due to film diffusion
+        # Mass transfer term due to film diffusion ==============================
         # Particle Sherwood number
         @self.Expression(
             self.flowsheet().time,
@@ -1675,7 +1690,7 @@ and used when constructing these
                 diffusivity = 1.5e-5 * pyunits.m**2 / pyunits.s
             if self.config.adsorbent_shape == "particle":
                 return (
-                    b.kc_film[t, x, i] * b.particle_diameter
+                    b.kc_film[t, x, i] * b.solid_phase.particle_diameter
                     == b.Sh_number[t, x, i] * diffusivity
                 )
             else:
@@ -1684,27 +1699,49 @@ and used when constructing these
                     == b.Sh_number[t, x, i] * diffusivity
                 )
 
+        # mass transfer rate
         @self.Constraint(
             self.flowsheet().time,
             self.length_domain,
-            self.adsorbed_components,
+            self.config.property_package.component_list,
             doc=""""Mass transfer rate due to film diffusion""",
         )
         def mass_transfer_film_diffusion_eqn(b, t, x, j):
-            return (
-                b.gas_phase.mass_transfer_term[t, x, "Vap", j]
-                == b.kc_film[t, x, j]
-                * (
-                    b.mole_frac_comp_surface[t, x, j]
-                    - b.gas_phase.properties[t, x].mole_frac_comp[j]
+            if j in b.adsorbed_components:
+                return (
+                    b.gas_phase.mass_transfer_term[t, x, "Vap", j]
+                    == b.kc_film[t, x, j]
+                    * (
+                        b.mole_frac_comp_surface[t, x, j]
+                        - b.gas_phase.properties[t, x].mole_frac_comp[j]
+                    )
+                    * b.wet_surface_area_per_length
+                    * b.gas_phase.properties[t, x].pressure
+                    / b.gas_phase.properties[t, x].temperature
+                    / constants.gas_constant
                 )
-                * b.wet_surface_area_per_length
-                * b.gas_phase.properties[t, x].pressure
-                / b.gas_phase.properties[t, x].temperature
-                / constants.gas_constant
-            )
+            else:
+                # if component not adsorbed, mass transfer rate = 0
+                return b.gas_phase.mass_transfer_term[t, x, "Vap", j] == 0
 
-        # Enthalpy transfer term due to adsorption, use enthalpy in gas phase
+        # ====================================================================
+
+        # linking constraint for mass transfer ================================
+        # @self.Constraint(
+        #     self.flowsheet().time,
+        #     self.length_domain,
+        #     self.adsorbed_components,
+        #     doc="""linking constraint for gas and solid mass transfer""",
+        # )
+        # def mass_transfer_linking(b, t, x, j):
+        #     return (
+        #         b.gas_phase.mass_transfer_term[t, x, "Vap", j]
+        #         == b.solid_phase.mass_transfer_term[t, x, j]
+        #     )
+
+        # =====================================================================
+
+        # Enthalpy transfer term due to adsorption, use enthalpy in gas phase =======
         @self.Constraint(
             self.flowsheet().time,
             self.length_domain,
@@ -1719,7 +1756,9 @@ and used when constructing these
                 )
             )
 
-        # heat transfer from solid phase to gas phase
+        # ============================================================================
+
+        # heat transfer from solid phase to gas phase ======================================
         # Dimensionless numbers, mass and heat transfer coefficients
         # Particle Reynolds number, Nusselt number, etc.
         @self.Constraint(
@@ -1733,15 +1772,15 @@ and used when constructing these
                 return (
                     b.Re_number[t, x] * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
                     == b.velocity_superficial_gas[t, x]
-                    * b.particle_diameter
+                    * b.solid_phase.particle_diameter
                     * b.gas_phase.properties[t, x].dens_mass
                 )
             else:
-                # Re is calculated based on velocity in the monolith channel
+                # Re is calculated based on hydraulic diameter
                 return (
                     b.Re_number[t, x] * b.gas_phase.properties[t, x].visc_d_phase["Vap"]
                     == b.velocity_gas_phase[t, x]
-                    * b.hydraulic_diameter
+                    * b.solid_phase.hydraulic_diameter
                     * b.gas_phase.properties[t, x].dens_mass
                 )
 
@@ -1791,21 +1830,18 @@ and used when constructing these
         def gas_solid_htc_eqn(b, t, x):
             if self.config.adsorbent_shape == "particle":
                 return (
-                    b.gas_solid_htc[t, x] * b.particle_diameter
+                    b.gas_solid_htc[t, x] * b.solid_phase.particle_diameter
                     == b.Nu_number[t, x]
                     * b.gas_phase.properties[t, x].therm_cond_phase["Vap"]
                 )
             else:
                 return (
-                    b.gas_solid_htc[t, x] * b.hydraulic_diameter
+                    b.gas_solid_htc[t, x] * b.solid_phase.hydraulic_diameter
                     == b.Nu_number[t, x]
                     * b.gas_phase.properties[t, x].therm_cond_phase["Vap"]
                 )
 
         # heat transfer rate from solid phase to gas phase
-        # Note: Current code consider the number of particles in a unit bed volume based on volume
-        # of porous particles while the original code based on the volume of true solid materials
-        # Therefore, the heat transfer area is larger than that in the original code
         @self.Constraint(
             self.flowsheet().time,
             self.length_domain,
@@ -1815,8 +1851,25 @@ and used when constructing these
             return (
                 b.heat_solid_to_gas[t, x]
                 == b.gas_solid_htc[t, x]
-                * (b.solid_temperature[t, x] - b.gas_phase.properties[t, x].temperature)
+                * (
+                    b.solid_phase.temperature[t, x]
+                    - b.gas_phase.properties[t, x].temperature
+                )
                 * b.wet_surface_area_per_length
+            )
+
+        # heat transfer between wall and gas
+        @self.Expression(
+            self.flowsheet().time,
+            self.length_domain,
+            doc="wall to gas heat transfer",
+        )
+        def wall_to_gas_heat_transfer(b, t, x):
+            return (
+                constants.pi
+                * b.bed_diameter
+                * b.heat_transfer_coeff_gas_wall
+                * (b.wall_temperature[t, x] - b.gas_phase.properties[t, x].temperature)
             )
 
         # gas phase total heat duty
@@ -1826,15 +1879,14 @@ and used when constructing these
             doc="Solid to gas heat transfer",
         )
         def gas_phase_heat_transfer(b, t, x):
-            return b.gas_phase.heat[t, x] == b.heat_solid_to_gas[
-                t, x
-            ] + constants.pi * b.bed_diameter * b.heat_transfer_coeff_gas_wall * (
-                b.wall_temperature[t, x] - b.gas_phase.properties[t, x].temperature
+            return (
+                b.gas_phase.heat[t, x]
+                == b.heat_solid_to_gas[t, x] + b.wall_to_gas_heat_transfer[t, x]
             )
 
         # Solid phase component balance
         # material holdup constraint
-        @self.Constraint(
+        @self.solid_phase.Constraint(
             self.flowsheet().config.time,
             self.length_domain,
             self.adsorbed_components,
@@ -1842,11 +1894,11 @@ and used when constructing these
         )
         def adsorbate_holdup_eqn(b, t, x, j):
             return b.adsorbate_holdup[t, x, j] == (
-                b.solid_phase_area * b.adsorbent_dens * b.adsorbate_loading[t, x, j]
+                b.area * b.adsorbent_dens * b.adsorbate_loading[t, x, j]
             )
 
         # Add component balances of adsorbate
-        @self.Constraint(
+        @self.solid_phase.Constraint(
             self.flowsheet().time,
             self.length_domain,
             self.adsorbed_components,
@@ -1855,36 +1907,40 @@ and used when constructing these
         def solid_material_balances(b, t, x, j):
             if self.config.dynamic:
                 return b.adsorbate_accumulation[t, x, j] == (
-                    -b.gas_phase.mass_transfer_term[t, x, "Vap", j]
+                    -b.parent_block().gas_phase.mass_transfer_term[t, x, "Vap", j]
                 )
             else:
-                return 0 == -b.gas_phase.mass_transfer_term[t, x, "Vap", j]
+                return (
+                    0 == -b.parent_block().gas_phase.mass_transfer_term[t, x, "Vap", j]
+                )
 
         # Solid phase energy balance
-        @self.Constraint(
+        @self.solid_phase.Constraint(
             self.flowsheet().config.time,
             self.length_domain,
             doc="Solid phase energy holdup constraints",
         )
         def solid_energy_holdup_eqn(b, t, x):
             return b.solid_energy_holdup[t, x] == (
-                b.solid_phase_area
+                b.area
                 * b.adsorbent_dens
                 * b.cp_mass_param
-                * (b.solid_temperature[t, x] - b.temperature_ref)
+                * (b.temperature[t, x] - b.temperature_ref)
                 + sum(
                     b.adsorbate_holdup[t, x, i]
                     * (
-                        getattr(b.config.property_package, i).enth_mol_form_vap_comp_ref
+                        getattr(
+                            b.parent_block().config.property_package, i
+                        ).enth_mol_form_vap_comp_ref
                         + b.dh_ads[i]
                         + b.cp_mol_comp_adsorbate[i]
-                        * (b.solid_temperature[t, x] - b.temperature_ref)
+                        * (b.temperature[t, x] - b.temperature_ref)
                     )
-                    for i in b.adsorbed_components
+                    for i in b.parent_block().adsorbed_components
                 )
             )
 
-        @self.Constraint(
+        @self.solid_phase.Constraint(
             self.flowsheet().config.time,
             self.length_domain,
             doc="Solid phase energy balances",
@@ -1897,16 +1953,16 @@ and used when constructing these
             if self.config.dynamic:
                 return (
                     b.solid_energy_accumulation[t, x]
-                    == -b.heat_solid_to_gas[t, x]
-                    - b.gas_phase.enthalpy_transfer[t, x]
-                    + jheat * b.bed_area
+                    == -b.parent_block().heat_solid_to_gas[t, x]
+                    - b.parent_block().gas_phase.enthalpy_transfer[t, x]
+                    + jheat * b.parent_block().bed_area
                 )
             else:
                 return (
                     0
-                    == -b.heat_solid_to_gas[t, x]
-                    - b.gas_phase.enthalpy_transfer[t, x]
-                    + jheat * b.bed_area
+                    == -b.parent_block().heat_solid_to_gas[t, x]
+                    - b.parent_block().gas_phase.enthalpy_transfer[t, x]
+                    + jheat * b.parent_block().bed_area
                 )
 
         @self.Expression(
@@ -1941,7 +1997,7 @@ and used when constructing these
             self.length_domain,
             doc="Heat transfer rate from fluid to wall per bed length",
         )
-        def heat_fluid_to_wall(b, t, x):
+        def fluid_to_wall_heat_transfer(b, t, x):
             return (
                 constants.pi
                 * b.wall_diameter
@@ -2014,8 +2070,8 @@ and used when constructing these
                 blk.mole_frac_comp_surface[:, :, k] = blk.gas_inlet.mole_frac_comp[
                     blk.flowsheet().time.first(), k
                 ]()
-        if hasattr(blk, "solid_temperature"):
-            blk.solid_temperature[:, :] = blk.gas_inlet.temperature[
+        if hasattr(blk.solid_phase, "temperature"):
+            blk.solid_phase.temperature[:, :] = blk.gas_inlet.temperature[
                 blk.flowsheet().time.first()
             ]()
         if hasattr(blk, "wall_temperature"):
@@ -2044,13 +2100,13 @@ and used when constructing these
             blk.bed_area_eqn,
         )
 
+        calculate_variable_from_constraint(
+            blk.gas_phase.area,
+            blk.gas_phase_area_constraint,
+        )
+
         for t in blk.flowsheet().time:
             for x in blk.length_domain:
-                calculate_variable_from_constraint(
-                    blk.gas_phase.area[t, x],
-                    blk.gas_phase_area_constraint[t, x],
-                )
-
                 calculate_variable_from_constraint(
                     blk.velocity_superficial_gas[t, x],
                     blk.velocity_superficial_gas_eqn[t, x],
@@ -2066,33 +2122,33 @@ and used when constructing these
                     blk.RH_eq[t, x],
                 )
 
-                if hasattr(blk, "ln_qtoth"):
-                    if hasattr(blk, "iso_terms"):
+                if hasattr(blk.solid_phase, "ln_qtoth"):
+                    if hasattr(blk.solid_phase, "iso_terms"):
                         calculate_variable_from_constraint(
-                            blk.ln_qtoth[t, x, "chem"],
-                            blk.ln_qtoth_eq[t, x, "chem"],
+                            blk.solid_phase.ln_qtoth[t, x, "chem"],
+                            blk.solid_phase.ln_qtoth_eq[t, x, "chem"],
                         )
                         calculate_variable_from_constraint(
-                            blk.ln_qtoth[t, x, "phys"],
-                            blk.ln_qtoth_eq[t, x, "phys"],
+                            blk.solid_phase.ln_qtoth[t, x, "phys"],
+                            blk.solid_phase.ln_qtoth_eq[t, x, "phys"],
                         )
                     else:
                         calculate_variable_from_constraint(
-                            blk.ln_qtoth[t, x],
-                            blk.ln_qtoth_eq[t, x],
+                            blk.solid_phase.ln_qtoth[t, x],
+                            blk.solid_phase.ln_qtoth_eq[t, x],
                         )
 
-                if hasattr(blk, "adsorbate_loading_equil"):
+                if hasattr(blk.solid_phase, "adsorbate_loading_equil"):
                     if "H2O" in blk.config.adsorbed_components:
                         calculate_variable_from_constraint(
-                            blk.adsorbate_loading_equil[t, x, "H2O"],
-                            blk.isotherm_eqn[t, x, "H2O"],
+                            blk.solid_phase.adsorbate_loading_equil[t, x, "H2O"],
+                            blk.solid_phase.isotherm_eqn[t, x, "H2O"],
                         )
 
                     if "CO2" in blk.config.adsorbed_components:
                         calculate_variable_from_constraint(
-                            blk.adsorbate_loading_equil[t, x, "CO2"],
-                            blk.isotherm_eqn[t, x, "CO2"],
+                            blk.solid_phase.adsorbate_loading_equil[t, x, "CO2"],
+                            blk.solid_phase.isotherm_eqn[t, x, "CO2"],
                         )
 
         # getting port states =========================
@@ -2109,8 +2165,8 @@ and used when constructing these
         # =================================
         # deactivate mass transfer
         # fix loading and deactivate solids mass transfer (only adsorbed components)
-        blk.adsorbate_loading.fix()
-        for (t, x, j), v in blk.mass_transfer_eqn.items():
+        blk.solid_phase.adsorbate_loading.fix()
+        for (t, x, j), v in blk.solid_phase.mass_transfer_eqn.items():
             if j in blk.adsorbed_components:
                 v.deactivate()
 
@@ -2138,8 +2194,8 @@ and used when constructing these
         else:
             _log.warning("{} Initialization Step 2 Failed.".format(blk.name))
 
-        blk.adsorbate_loading.unfix()
-        blk.mass_transfer_eqn.activate()
+        blk.solid_phase.adsorbate_loading.unfix()
+        blk.solid_phase.mass_transfer_eqn.activate()
 
         init_log.info("Activating mass transfer and solving")
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
@@ -2200,13 +2256,13 @@ and used when constructing these
             sf = 1 / value(self.bed_diameter)
             iscale.set_scaling_factor(self.bed_diameter, sf)
 
-        if hasattr(self, "hydraulic_diameter"):
-            sf = 1 / value(self.hydraulic_diameter)
-            iscale.set_scaling_factor(self.hydraulic_diameter, sf)
+        if hasattr(self.solid_phase, "hydraulic_diameter"):
+            sf = 1 / value(self.solid_phase.hydraulic_diameter)
+            iscale.set_scaling_factor(self.solid_phase.hydraulic_diameter, sf)
 
-        if hasattr(self, "particle_diameter"):
-            sf = 1 / value(self.particle_diameter)
-            iscale.set_scaling_factor(self.particle_diameter, sf)
+        if hasattr(self.solid_phase, "particle_diameter"):
+            sf = 1 / value(self.solid_phase.particle_diameter)
+            iscale.set_scaling_factor(self.solid_phase.particle_diameter, sf)
 
         if hasattr(self, "wall_diameter"):
             sf = 1 / value(self.wall_diameter)
@@ -2229,8 +2285,8 @@ and used when constructing these
         if hasattr(self, "fluid_temperature"):
             iscale.set_scaling_factor(self.fluid_temperature, 1e-2)
 
-        if hasattr(self, "solid_temperature"):
-            iscale.set_scaling_factor(self.solid_temperature, 1e-2)
+        if hasattr(self.solid_phase, "temperature"):
+            iscale.set_scaling_factor(self.solid_phase.temperature, 1e-2)
 
         if hasattr(self, "velocity_superficial_gas"):
             iscale.set_scaling_factor(self.velocity_superficial_gas, 10)
@@ -2239,9 +2295,9 @@ and used when constructing these
         # viscosity of 1e-5
         if hasattr(self, "Re_number"):
             if self.config.adsorbent_shape == "particle":
-                sf = 1 / value(self.particle_diameter)
+                sf = 1 / value(self.solid_phase.particle_diameter)
             else:
-                sf = 1 / value(self.hydraulic_diameter)
+                sf = 1 / value(self.solid_phase.hydraulic_diameter)
             for (t, x), v in self.Re_number.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 1e-5 * sf)
@@ -2255,9 +2311,9 @@ and used when constructing these
         # thermal conductivity around 0.025 W/m/K and Nu around 2
         if hasattr(self, "gas_solid_htc"):
             if self.config.adsorbent_shape == "particle":
-                sf = value(self.particle_diameter)
+                sf = value(self.solid_phase.particle_diameter)
             else:
-                sf = value(self.hydraulic_diameter)
+                sf = value(self.solid_phase.hydraulic_diameter)
             for (t, x), v in self.gas_solid_htc.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 4 * sf)
@@ -2267,18 +2323,18 @@ and used when constructing these
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 0.01)
 
-        if hasattr(self, "adsorbate_loading"):
-            for (t, x, i), v in self.adsorbate_loading.items():
+        if hasattr(self.solid_phase, "adsorbate_loading"):
+            for (t, x, i), v in self.solid_phase.adsorbate_loading.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 1)
 
-        if hasattr(self, "adsorbate_loading_equil"):
-            for (t, x, i), v in self.adsorbate_loading_equil.items():
+        if hasattr(self.solid_phase, "adsorbate_loading_equil"):
+            for (t, x, i), v in self.solid_phase.adsorbate_loading_equil.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 1)
 
-        if hasattr(self, "adsorbate_holdup"):
-            for (t, x, i), v in self.adsorbate_holdup.items():
+        if hasattr(self.solid_phase, "adsorbate_holdup"):
+            for (t, x, i), v in self.solid_phase.adsorbate_holdup.items():
                 if iscale.get_scaling_factor(v) is None:
                     iscale.set_scaling_factor(v, 1)
 
@@ -2298,10 +2354,10 @@ and used when constructing these
         for (t, x), v in self.gas_phase.heat.items():
             iscale.set_scaling_factor(v, 1e-1)
 
-        for (t, x), v in self.solid_energy_holdup.items():
+        for (t, x), v in self.solid_phase.solid_energy_holdup.items():
             iscale.set_scaling_factor(v, 1e-4)
 
-        if hasattr(self, "C1"):
+        if hasattr(self.solid_phase, "C1"):
             iscale.set_scaling_factor(self.C1, 1e12)
 
         # Scale some constraints
@@ -2344,8 +2400,8 @@ and used when constructing these
                     overwrite=False,
                 )
 
-        if hasattr(self, "mass_transfer_eqn"):
-            for (t, x, i), c in self.mass_transfer_eqn.items():
+        if hasattr(self.solid_phase, "mass_transfer_eqn"):
+            for (t, x, i), c in self.solid_phase.mass_transfer_eqn.items():
                 iscale.constraint_scaling_transform(
                     c,
                     iscale.get_scaling_factor(
@@ -2378,25 +2434,29 @@ and used when constructing these
                     overwrite=False,
                 )
 
-        if hasattr(self, "adsorbate_holdup_eqn"):
-            for (t, x, j), c in self.adsorbate_holdup_eqn.items():
-                sf = iscale.get_scaling_factor(self.adsorbate_holdup[t, x, j])
+        if hasattr(self.solid_phase, "adsorbate_holdup_eqn"):
+            for (t, x, j), c in self.solid_phase.adsorbate_holdup_eqn.items():
+                sf = iscale.get_scaling_factor(
+                    self.solid_phase.adsorbate_holdup[t, x, j]
+                )
                 iscale.constraint_scaling_transform(c, sf, overwrite=False)
 
-        if hasattr(self, "solid_energy_holdup_eqn"):
-            for (t, x), c in self.solid_energy_holdup_eqn.items():
-                sf = iscale.get_scaling_factor(self.solid_energy_holdup[t, x])
+        if hasattr(self.solid_phase, "solid_energy_holdup_eqn"):
+            for (t, x), c in self.solid_phase.solid_energy_holdup_eqn.items():
+                sf = iscale.get_scaling_factor(
+                    self.solid_phase.solid_energy_holdup[t, x]
+                )
                 iscale.constraint_scaling_transform(c, sf, overwrite=False)
 
-        if hasattr(self, "solid_material_balances"):
-            for (t, x, i), c in self.solid_material_balances.items():
+        if hasattr(self.solid_phase, "solid_material_balances"):
+            for (t, x, i), c in self.solid_phase.solid_material_balances.items():
                 sf = iscale.get_scaling_factor(
                     self.gas_phase.mass_transfer_term[t, x, "Vap", i]
                 )
                 iscale.constraint_scaling_transform(c, sf, overwrite=False)
 
-        if hasattr(self, "solid_energy_balance"):
-            for (t, x), c in self.solid_energy_balance.items():
+        if hasattr(self.solid_phase, "solid_energy_balance"):
+            for (t, x), c in self.solid_phase.solid_energy_balance.items():
                 sf = iscale.get_scaling_factor(self.heat_solid_to_gas[t, x])
                 iscale.constraint_scaling_transform(c, sf, overwrite=False)
 
@@ -2426,10 +2486,10 @@ and used when constructing these
 
     def set_initial_condition(self):
         if self.config.dynamic is True:
-            self.solid_energy_accumulation[:, :].value = 0
-            self.adsorbate_accumulation[:, :, :].value = 0
-            self.solid_energy_accumulation[0, :].fix(0)
-            self.adsorbate_accumulation[0, :, :].fix(0)
+            self.solid_phase.solid_energy_accumulation[:, :].value = 0
+            self.solid_phase.adsorbate_accumulation[:, :, :].value = 0
+            self.solid_phase.solid_energy_accumulation[0, :].fix(0)
+            self.solid_phase.adsorbate_accumulation[0, :, :].fix(0)
             self.gas_phase.material_accumulation[:, :, :, :].value = 0
             self.gas_phase.energy_accumulation[:, :, :].value = 0
             self.gas_phase.material_accumulation[0, :, :, :].fix(0)
