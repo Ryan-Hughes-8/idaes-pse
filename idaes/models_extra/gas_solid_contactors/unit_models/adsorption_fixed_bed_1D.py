@@ -2012,7 +2012,7 @@ and used when constructing these
         blk,
         gas_phase_state_args=None,
         outlvl=idaeslog.NOTSET,
-        solver=None,
+        solver="ipopt_v2",
         optarg=None,
     ):
         """
@@ -2027,7 +2027,7 @@ and used when constructing these
             optarg : solver options dictionary object (default=None, use
                      default solver options)
             solver : str indicating which solver to use during
-                     initialization (default = None, use default solver)
+                     initialization (default = "ipopt_v2")
 
         Returns:
             None
