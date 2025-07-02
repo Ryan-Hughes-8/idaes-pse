@@ -921,14 +921,14 @@ and used when constructing these
             self.solid_phase.SB_gamma = Var(
                 initialize=-0.137,
                 units=pyunits.kg / pyunits.mol,
-                bounds=(-1, 0.2),
+                bounds=(None, None),
                 doc="Stampi-Bomblli model parameter gamma [kg/mol]",
             )
             self.solid_phase.SB_gamma.fix()
             self.solid_phase.SB_beta = Var(
                 initialize=5.612,
                 units=pyunits.kg / pyunits.mol,
-                bounds=(-0.1, 25),
+                bounds=(None, None),
                 doc="Stampi-Bomblli model parameter beta [kg/mol]",
             )
             self.solid_phase.SB_beta.fix()
