@@ -1648,11 +1648,11 @@ and used when constructing these
                 the solid phase modeled using the LDF model""",
         )
         def mass_transfer_eqn(b, t, x, j):
-            return b.parent_block().gas_phase.mass_transfer_term[t, x, "Vap", j] == -(
-                b.kf[t, x, j]
-                * (b.adsorbate_loading_equil[t, x, j] - b.adsorbate_loading[t, x, j])
-                * b.area
-                * b.adsorbent_dens
+            coeff_ = b.kf[t, x, j] * b.area * b.adsorbent_dens
+            return (
+                b.parent_block().gas_phase.mass_transfer_term[t, x, "Vap", j]
+                + coeff_ * b.adsorbate_loading_equil[t, x, j]
+                == coeff_ * b.adsorbate_loading[t, x, j]
             )
 
         # Mass transfer term due to film diffusion ==============================
@@ -1708,17 +1708,17 @@ and used when constructing these
         )
         def mass_transfer_film_diffusion_eqn(b, t, x, j):
             if j in b.adsorbed_components:
-                return (
-                    b.gas_phase.mass_transfer_term[t, x, "Vap", j]
-                    == b.kc_film[t, x, j]
-                    * (
-                        b.mole_frac_comp_surface[t, x, j]
-                        - b.gas_phase.properties[t, x].mole_frac_comp[j]
-                    )
+                coeff_ = (
+                    b.kc_film[t, x, j]
                     * b.wet_surface_area_per_length
                     * b.gas_phase.properties[t, x].pressure
                     / b.gas_phase.properties[t, x].temperature
                     / constants.gas_constant
+                )
+                return (
+                    b.gas_phase.mass_transfer_term[t, x, "Vap", j]
+                    + coeff_ * b.gas_phase.properties[t, x].mole_frac_comp[j]
+                    == coeff_ * b.mole_frac_comp_surface[t, x, j]
                 )
             else:
                 # if component not adsorbed, mass transfer rate = 0
@@ -2122,22 +2122,6 @@ and used when constructing these
                     blk.RH_eq[t, x],
                 )
 
-                if hasattr(blk.solid_phase, "ln_qtoth"):
-                    if hasattr(blk.solid_phase, "iso_terms"):
-                        calculate_variable_from_constraint(
-                            blk.solid_phase.ln_qtoth[t, x, "chem"],
-                            blk.solid_phase.ln_qtoth_eq[t, x, "chem"],
-                        )
-                        calculate_variable_from_constraint(
-                            blk.solid_phase.ln_qtoth[t, x, "phys"],
-                            blk.solid_phase.ln_qtoth_eq[t, x, "phys"],
-                        )
-                    else:
-                        calculate_variable_from_constraint(
-                            blk.solid_phase.ln_qtoth[t, x],
-                            blk.solid_phase.ln_qtoth_eq[t, x],
-                        )
-
                 if hasattr(blk.solid_phase, "adsorbate_loading_equil"):
                     if "H2O" in blk.config.adsorbed_components:
                         calculate_variable_from_constraint(
@@ -2184,7 +2168,7 @@ and used when constructing these
         # blk.gas_phase_heat_transfer.deactivate()
         # blk.gas_phase.heat.fix(0)
 
-        init_log.info("Initialize with deactivated mass and heat transfer")
+        init_log.info("Initialize with deactivated mass transfer")
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
             results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
         if check_optimal_termination(results):
