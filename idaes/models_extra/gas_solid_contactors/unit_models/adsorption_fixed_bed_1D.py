@@ -98,6 +98,10 @@ from idaes.core.util import scaling as iscale
 from idaes.core.solvers import get_solver
 from idaes.core.util.math import smooth_max
 
+from idaes.core.initialization.block_triangularization import (
+    BlockTriangularizationInitializer,
+)
+
 __author__ = "Chinedu Okoli, Anca Ostace, Jinliang Ma, Ryan Hughes"
 
 # Set up logger
@@ -1996,6 +2000,10 @@ and used when constructing these
         # Create solver
         opt = get_solver(solver, optarg)
 
+        # create Block init object
+        init_obj = BlockTriangularizationInitializer()
+        init_obj.config.block_solver_options = optarg
+
         # initial guess for state vars, equal to value at inlet at first time step ========================
         if blk.gas_phase._flow_direction == FlowDirection.backward:
             _idx = blk.gas_phase.length_domain.last()
@@ -2089,12 +2097,19 @@ and used when constructing these
         for n, v in blk.gas_inlet.vars.items():
             for i in v:
                 gas_inlet_flags[n, i] = v[i].fixed
+
+        gas_outlet_flags = {}
+        for n, v in blk.gas_outlet.vars.items():
+            for i in v:
+                gas_outlet_flags[n, i] = v[i].fixed
+        print(gas_outlet_flags)
         # =============================================
 
         # setting port states for initialization. # this causes one of the
         # cases to fail right now, will fix soon
-        init_log.info_high("Fixing Inlet Port States")
+        init_log.info_high("Fixing/unfixing Port States")
         blk.gas_inlet.fix()
+        blk.gas_outlet.unfix()
         # =================================
         # deactivate mass transfer
         # fix loading and deactivate solids mass transfer (only adsorbed components)
@@ -2105,6 +2120,8 @@ and used when constructing these
 
         init_log.info("Initialize with deactivated mass transfer")
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
+            # init_obj.config.block_solver_call_options = {"tee": slc.tee}
+            # init_obj.initialization_routine(blk)
             results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
         if check_optimal_termination(results):
             init_log.info_high(
@@ -2117,6 +2134,9 @@ and used when constructing these
         blk.mass_transfer_eqn.activate()
 
         init_log.info("Activating mass transfer and solving")
+        # with idaeslog.solver_log(init_log, idaeslog.DEBUG) as slc:
+        #     init_obj.config.block_solver_call_options = {"tee": slc.tee}
+        #     init_obj.initialization_routine(blk)
         with idaeslog.solver_log(solve_log, idaeslog.DEBUG) as slc:
             results = opt.solve(blk, tee=slc.tee, symbolic_solver_labels=True)
         if check_optimal_termination(results):
@@ -2127,10 +2147,17 @@ and used when constructing these
             _log.warning("{} Initialization Step 3 Failed.".format(blk.name))
 
         # revert port states =========================
-        init_log.info_high("Reverting Inlet Port States")
+        init_log.info_high("Reverting Port States and Values")
         for n, v in blk.gas_inlet.vars.items():
             for i in v:
                 if gas_inlet_flags[n, i]:
+                    v[i].fix()
+                else:
+                    v[i].unfix()
+
+        for n, v in blk.gas_outlet.vars.items():
+            for i in v:
+                if gas_outlet_flags[n, i]:
                     v[i].fix()
                 else:
                     v[i].unfix()
