@@ -102,6 +102,8 @@ from idaes.core.initialization.block_triangularization import (
     BlockTriangularizationInitializer,
 )
 
+from idaes.core.util.dyn_utils import deactivate_model_at
+
 __author__ = "Chinedu Okoli, Anca Ostace, Jinliang Ma, Ryan Hughes"
 
 # Set up logger
@@ -2004,6 +2006,18 @@ and used when constructing these
         init_obj = BlockTriangularizationInitializer()
         init_obj.config.block_solver_options = optarg
 
+        # getting port states ---------------------------------------------------
+        gas_inlet_flags = {}
+        for n, v in blk.gas_inlet.vars.items():
+            for i in v:
+                gas_inlet_flags[n, i] = {"fixed": v[i].fixed, "value": v[i].value}
+
+        gas_outlet_flags = {}
+        for n, v in blk.gas_outlet.vars.items():
+            for i in v:
+                gas_outlet_flags[n, i] = {"fixed": v[i].fixed, "value": v[i].value}
+        # -----------------------------------------------------------------------
+
         # initial guess for state vars, equal to value at inlet at first time step ========================
         if blk.gas_phase._flow_direction == FlowDirection.backward:
             _idx = blk.gas_phase.length_domain.last()
@@ -2092,19 +2106,6 @@ and used when constructing these
                         blk.isotherm_eqn[t, x, j],
                     )
 
-        # getting port states =========================
-        gas_inlet_flags = {}
-        for n, v in blk.gas_inlet.vars.items():
-            for i in v:
-                gas_inlet_flags[n, i] = v[i].fixed
-
-        gas_outlet_flags = {}
-        for n, v in blk.gas_outlet.vars.items():
-            for i in v:
-                gas_outlet_flags[n, i] = v[i].fixed
-        print(gas_outlet_flags)
-        # =============================================
-
         # setting port states for initialization. # this causes one of the
         # cases to fail right now, will fix soon
         init_log.info_high("Fixing/unfixing Port States")
@@ -2146,19 +2147,19 @@ and used when constructing these
         else:
             _log.warning("{} Initialization Step 3 Failed.".format(blk.name))
 
-        # revert port states =========================
+        # revert port states ---------------------------------------------------
         init_log.info_high("Reverting Port States and Values")
         for n, v in blk.gas_inlet.vars.items():
             for i in v:
-                if gas_inlet_flags[n, i]:
-                    v[i].fix()
+                if gas_inlet_flags[n, i]["fixed"]:
+                    v[i].fix(gas_inlet_flags[n, i]["value"])
                 else:
                     v[i].unfix()
 
         for n, v in blk.gas_outlet.vars.items():
             for i in v:
-                if gas_outlet_flags[n, i]:
-                    v[i].fix()
+                if gas_outlet_flags[n, i]["fixed"]:
+                    v[i].fix(gas_outlet_flags[n, i]["value"])
                 else:
                     v[i].unfix()
 
