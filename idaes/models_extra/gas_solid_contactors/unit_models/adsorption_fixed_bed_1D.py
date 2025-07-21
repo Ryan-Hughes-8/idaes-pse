@@ -686,7 +686,7 @@ and used when constructing these
         elif self.config.mass_transfer_coefficient_type == "Fixed":
             self.k_fixed = Var(
                 self.adsorbed_components,
-                initialize=0.001,
+                initialize=1e-4,
                 units=pyunits.seconds**-1,
                 bounds=(1e-20, 100),
                 doc="fixed mass transfer coefficient parameter",
