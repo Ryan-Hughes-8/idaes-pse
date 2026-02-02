@@ -858,7 +858,7 @@ should be constructed,
                             to_units=units_meta_solid("length"),
                         )
                         ** 2
-                        * b.solid_properties[t, x].params.voidage ** 3
+                        * b.solid_properties[t, x].params.voidage**3
                     )
                 ) + (
                     (1.75 * pyunits.dimensionless)
@@ -870,7 +870,7 @@ should be constructed,
                             b.solid_properties[t, x].params.particle_dia,
                             to_units=units_meta_solid("length"),
                         )
-                        * b.solid_properties[t, x].params.voidage ** 3
+                        * b.solid_properties[t, x].params.voidage**3
                     )
                 )
 
@@ -961,19 +961,26 @@ should be constructed,
                 return b.solid_material_accumulation[t, x, j] == 0
 
         # Sum of mass fractions at all time equals 1
-        @self.Constraint(
-            self.flowsheet().config.time,
-            self.length_domain,
-            doc="Sum of mass fractions at all time",
-        )
-        def solid_sum_component_eqn(b, t, x):
-            if t == b.flowsheet().config.time.first():
-                return Constraint.Skip
-            else:
-                return 1 == sum(
-                    b.solid_properties[t, x].mass_frac_comp[j]
-                    for j in b.solid_properties[t, x].params.component_list
-                )
+        if hasattr(
+            self.solid_properties[
+                self.flowsheet().time.first(), self.length_domain.first()
+            ],
+            "mass_frac_comp",
+        ):
+
+            @self.Constraint(
+                self.flowsheet().config.time,
+                self.length_domain,
+                doc="Sum of mass fractions at all time",
+            )
+            def solid_sum_component_eqn(b, t, x):
+                if t == b.flowsheet().config.time.first():
+                    return Constraint.Skip
+                else:
+                    return 1 == sum(
+                        b.solid_properties[t, x].mass_frac_comp[j]
+                        for j in b.solid_properties[t, x].params.component_list
+                    )
 
         # ---------------------------------------------------------------------
         if self.config.energy_balance_type != EnergyBalanceType.none:
