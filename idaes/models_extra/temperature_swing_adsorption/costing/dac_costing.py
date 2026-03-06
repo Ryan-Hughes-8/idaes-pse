@@ -31,6 +31,8 @@ from pyomo.util.calc_var_value import calculate_variable_from_constraint
 from idaes.core import UnitModelBlock, UnitModelCostingBlock
 from idaes.core.util.exceptions import ConfigurationError
 from idaes.core.util.tables import stream_table_dataframe_to_string
+from idaes.core.util.math import smooth_max
+import idaes.logger as idaeslog
 
 from idaes.models_extra.power_generation.costing.power_plant_capcost import (
     QGESSCosting,
@@ -38,6 +40,27 @@ from idaes.models_extra.power_generation.costing.power_plant_capcost import (
 )
 
 directory = this_file_dir()
+_log = idaeslog.getLogger(__name__)
+
+
+def _nonneg(expr, unit):
+    """
+    Return a smooth nonnegative version of expr with the given units.
+    """
+    return smooth_max(0, units.convert(expr, to_units=unit) / unit) * unit
+
+
+def _warn_if_negative(expr, name):
+    try:
+        v = value(expr)
+    except Exception:
+        return
+    if v < 0:
+        _log.warning(
+            "%s is negative (%.6g). Clamping to zero for costing stability.",
+            name,
+            v,
+        )
 
 
 def get_dac_costing(tsa, costing_case="electric_boiler"):
@@ -170,34 +193,40 @@ def _get_costing_electric_boiler(tsa):
         tsa.flow_mol_in_total, to_units=units.kmol / units.hr
     )  # [kmol/hr]
     # compressor auxiliary load - from surrogates
-    product_compressor_auxiliary_load = (
-        0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
-    ) * units.kW  # [kW]
+    _pcal_dimless = 0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
+    _warn_if_negative(_pcal_dimless, "product_compressor_auxiliary_load surrogate")
+    product_compressor_auxiliary_load = smooth_max(0, _pcal_dimless) * units.kW  # [kW]
     # boiler auxiliary load - from surrogates
-    boiler_auxiliary_load = (
+    boiler_auxiliary_load = _nonneg(
         0.000335999
         * units.convert(tsa.flow_mass_steam, to_units=units.lb / units.hr)
         * units.hr
         / units.lb
         * 1e3
-    ) * units.kW  # covert MW to kW
+        * units.kW,
+        units.kW,
+    )  # convert MW to kW
     # total auxiliary load
     # calculate with fans work + compressor for CO2 pure + boiler aux load
-    total_auxiliary_load = (
+    total_auxiliary_load = _nonneg(
         product_compressor_auxiliary_load
         + boiler_auxiliary_load
-        + units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW)
+        + units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW),
+        units.kW,
     )
     # compressor aftercooler heat exchanger duty - from surrogates
+    _cahd_dimless = 2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8
+    _warn_if_negative(_cahd_dimless, "compressor_aftercooler_heat_duty surrogate")
     compressor_aftercooler_heat_duty = (
-        (2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8) * units.MBtu / units.hr
+        smooth_max(0, _cahd_dimless) * units.MBtu / units.hr
     )  # [MMBtu/hr]
     # auxiliary load for 2 beds (pressure changer from TSA model estimates
     # the power required to move air or exhaust gas to all beds)
-    auxiliary_load_2_beds = (
+    auxiliary_load_2_beds = _nonneg(
         2
         * units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW)
-        / tsa.number_beds
+        / tsa.number_beds,
+        units.kW,
     )  # [kW]
 
     # sorbent makeup accounts
@@ -712,24 +741,29 @@ def _get_costing_retrofit_ngcc(tsa):
         tsa.flow_mass_in_total, to_units=units.lb / units.hr
     )  # [lb/hr]
     # compressor auxiliary load - from surrogates
-    product_compressor_auxiliary_load = (
-        0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
-    ) * units.kW  # [kW]
+    _pcal_dimless = 0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
+    _warn_if_negative(_pcal_dimless, "product_compressor_auxiliary_load surrogate")
+    product_compressor_auxiliary_load = smooth_max(0, _pcal_dimless) * units.kW  # [kW]
     # total auxiliary load
     # calculate with fans work + compressor for CO2 pure
-    total_auxiliary_load = product_compressor_auxiliary_load + units.convert(
-        tsa.compressor.unit.work_mechanical[0], to_units=units.kW
+    total_auxiliary_load = _nonneg(
+        product_compressor_auxiliary_load
+        + units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW),
+        units.kW,
     )
     # compressor aftercooler heat exchanger duty - from surrogates
+    _cahd_dimless = 2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8
+    _warn_if_negative(_cahd_dimless, "compressor_aftercooler_heat_duty surrogate")
     compressor_aftercooler_heat_duty = (
-        (2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8) * units.MBtu / units.hr
+        smooth_max(0, _cahd_dimless) * units.MBtu / units.hr
     )  # [MMBtu/hr]
     # auxiliary load for 2 beds (pressure changer from TSA model estimates
     # the power required to move air or exhaust gas to all beds)
-    auxiliary_load_2_beds = (
+    auxiliary_load_2_beds = _nonneg(
         2
         * units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW)
-        / tsa.number_beds
+        / tsa.number_beds,
+        units.kW,
     )  # [kW]
 
     # sorbent makeup accounts
