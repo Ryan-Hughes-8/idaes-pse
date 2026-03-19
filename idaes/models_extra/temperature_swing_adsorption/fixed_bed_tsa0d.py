@@ -84,6 +84,8 @@ from idaes.models.unit_models.pressure_changer import (
 
 import idaes.logger as idaeslog
 
+from idaes.models_extra.temperature_swing_adsorption.isotherm_models import *
+
 __author__ = "Daison Yancy Caballero, Alex Noring"
 
 # Set up logger
@@ -108,9 +110,13 @@ class IsothermModel(Enum):
     """
 
     none = 0
-    Langmuir = 1
+    Langmuir = 1  # note functional yet
     dual_site_Langmuir = 2
-    # TODO: finish Langmuir, add Toth, Henry, and Langmuir-Freundlich
+    weighted_DSL = 3
+    extended_Sips = 4
+    Toth = 5
+    Henry = 6  # note functional yet
+    Langmuir_Freundlich = 7  # note functional yet
 
 
 class SteamCalculationType(Enum):
@@ -167,7 +173,10 @@ Default value is none which will throw an exception when called, an actual
 model must be specified when custom sorbent is declared.
 - IsothermModel.none (default)
 - IsothermModel.Langmuir
-- IsothermModel.dual_site_Langmuir""",
+- IsothermModel.dual_site_Langmuir
+- IsothermModel.weighted_DSL
+- IsothermModel.extended_Sips
+- IsothermModel.Toth""",
         ),
     )
     CONFIG.declare(
@@ -400,7 +409,16 @@ The property package must be iapws95.
         elif self.config.adsorbent == Adsorbent.custom:
             self._add_parameters_custom()
             if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                self._add_dual_site_Langmuir_parameters()
+                # self._add_dual_site_Langmuir_parameters()
+                add_dual_site_Langmuir_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.extended_Sips:
+                add_extended_Sips_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.weighted_DSL:
+                add_weighted_DSL_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.Toth:
+                add_Toth_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.Langmuir:
+                add_Langmuir_parameters(blk=self)
 
         # add design and operating variables
         self.flow_mol_in_total = Var(
@@ -1121,6 +1139,13 @@ The property package must be iapws95.
         )
         self.particle_dia = Param(
             initialize=2e-3, units=units.m, doc="Particle diameter"
+        )
+
+        self.dh_ads = Param(
+            self.isotherm_components,
+            initialize={"CO2": -37000, "N2": 0},
+            units=units.J / units.mol,
+            doc="Heat of adsorption",
         )
 
     def _add_inlet_port(self):
@@ -2124,7 +2149,15 @@ The property package must be iapws95.
         elif self.config.adsorbent == Adsorbent.custom:
 
             if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                return self._dual_site_Langmuir_isotherm(i, pressure, temperature)
+                return dual_site_Langmuir_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.extended_Sips:
+                return extended_Sips_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.weighted_DSL:
+                return weighted_DSL_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.Toth:
+                return Toth_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.Langmuir:
+                return Langmuir_isotherm(self, i, pressure, temperature)
 
     # TODO: develop a property package framework for adsorbents
     def _isotherm_zeolite_13x(self, i, pressure, temperature):
@@ -2424,132 +2457,6 @@ The property package must be iapws95.
             loading[i] = 1e-10 * units.mol / units.kg
 
         return loading[i]
-
-    def _dual_site_Langmuir_isotherm(self, i, pressure, temperature):
-        """
-        Method to add isotherm for components.
-        Isotherm equation: Dual site Langmuir (DSL) isotherm
-        Adsorbent: custom
-
-        NOTE: CO2 is considered as the only adsorbing component
-
-        Keyword Arguments:
-            i : component
-            pressure : partial pressure of components
-            temperature : temperature
-
-        """
-        T = temperature
-        p = {}
-        c = {}
-        loading = {}
-
-        for j in self.isotherm_components:
-            p[j] = units.convert(pressure[j], to_units=units.bar)
-            c[j] = units.convert(
-                (p[j] / const.gas_constant / T), to_units=units.mol / units.meter**3
-            )
-
-        if i == "CO2":
-
-            dual_site_langmuir_constant_b = self.dual_site_langmuir_constant_pre_exp_b[
-                i
-            ] * exp(
-                units.convert(
-                    -self.internal_energy_b[i],
-                    to_units=units.J / units.mol,
-                )
-                / const.gas_constant
-                / T
-            )
-
-            dual_site_langmuir_constant_d = self.dual_site_langmuir_constant_pre_exp_d[
-                i
-            ] * exp(
-                units.convert(
-                    -self.internal_energy_d[i],
-                    to_units=units.J / units.mol,
-                )
-                / const.gas_constant
-                / T
-            )
-
-            # portion of the isotherm for site b
-            loading_b = (
-                self.saturation_capacity_site_b[i]
-                * dual_site_langmuir_constant_b
-                * c[i]
-                / (1 + dual_site_langmuir_constant_b * c[i])
-            )
-
-            # portion of the isotherm for site d
-            loading_d = (
-                self.saturation_capacity_site_d[i]
-                * dual_site_langmuir_constant_d
-                * c[i]
-                / (1 + dual_site_langmuir_constant_d * c[i])
-            )
-
-            loading[i] = loading_b + loading_d  # [mol/kg]
-
-        elif i == "N2":
-            # no adsorption is assumed of N2
-            loading[i] = 1e-10 * units.mol / units.kg
-
-        return loading[i]
-
-    def _add_dual_site_Langmuir_parameters(self):
-        """
-        Method for adding parameters of the dual site Langmuir isotherm model.
-        """
-
-        self.dh_ads = Param(
-            self.isotherm_components,
-            initialize={"CO2": -37000, "N2": 0},
-            units=units.J / units.mol,
-            doc="Heat of adsorption",
-        )
-        self.temperature_ref = Param(
-            initialize=298.15,
-            units=units.K,
-            doc="Reference temperature",
-        )
-        self.saturation_capacity_site_b = Param(
-            self.isotherm_components,
-            initialize={"CO2": 2.387, "N2": 0.0},
-            units=units.mol / units.kg,
-            doc="saturation capacity at site b",
-        )
-        self.saturation_capacity_site_d = Param(
-            self.isotherm_components,
-            initialize={"CO2": 3.2711, "N2": 0.0},
-            units=units.mol / units.kg,
-            doc="saturation capacity at site d",
-        )
-        self.dual_site_langmuir_constant_pre_exp_b = Param(
-            self.isotherm_components,
-            initialize={"CO2": 5.519e-7, "N2": 0.0},
-            units=units.meter**3 / units.mol,
-            doc="dual site langmuir constant for site b",
-        )
-        self.dual_site_langmuir_constant_pre_exp_d = Param(
-            self.isotherm_components,
-            initialize={"CO2": 5.187e-08, "N2": 0.0},
-            units=units.meter**3 / units.mol,
-            doc="dual site langmuir constant for site d",
-        )
-        self.internal_energy_b = Param(
-            self.isotherm_components,
-            initialize={"CO2": -35.06, "N2": 0.0},
-            units=units.kJ / units.mol,
-            doc="internal energy of site b",
-        )
-        self.internal_energy_d = Param(
-            self.isotherm_components,
-            initialize={"CO2": -28.95, "N2": 0.0},
-            units=units.kJ / units.mol,
-            doc="internal energy of site d",
-        )
 
     def _partial_pressure(self, P, y):
         """
