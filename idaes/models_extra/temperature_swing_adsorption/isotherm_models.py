@@ -29,6 +29,137 @@ from pyomo.environ import (
 )
 
 
+def add_Langmuir_Freundlich_parameters(blk):
+    """
+    Method for adding parameters of the Langmuir isotherm model.
+    """
+
+    blk.LF_qm = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 5.0, "N2": 0.0},
+        units=units.mol / units.kg,
+        doc="Langmuir-Freundlich saturation capacity",
+    )
+    blk.LF_b0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 1e-10, "N2": 0.0},
+        units=units.Pa**-1,
+        doc="Langmuir-Freundlich b0 (pre-exponential)",
+    )
+    blk.LF_E = Param(
+        blk.isotherm_components,
+        initialize={"CO2": -35.0, "N2": 0.0},
+        units=units.kJ / units.mol,
+        doc="Langmuir-Freundlich E",
+    )
+    blk.LF_nu = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 0.8, "N2": 0.0},
+        units=units.dimensionless,
+        doc="Langmuir-Freundlich nu",
+    )
+
+
+def Langmuir_Freundlich_isotherm(blk, i, pressure, temperature):
+    """
+    Method to add isotherm for components.
+    Isotherm equation: Langmuir-Freundlich
+
+    NOTE: CO2 is considered as the only adsorbing component
+
+    Keyword Arguments:
+        i : component
+        pressure : partial pressure of components
+        temperature : temperature
+
+    """
+
+    T = temperature
+    p = {}
+    loading = {}
+
+    for j in blk.isotherm_components:
+        p[j] = units.convert(pressure[j], to_units=units.Pa)
+
+    if i == "CO2":
+
+        affinity = blk.LF_b0[i] * exp(
+            units.convert(-blk.LF_E[i], to_units=units.J / units.mol)
+            / const.gas_constant
+            / T
+        )
+
+        loading[i] = (
+            blk.LF_qm[i]
+            * affinity
+            * p[i] ** blk.LF_nu[i]
+            / (1 + affinity * p[i] ** blk.LF_nu[i])
+        )
+
+    elif i == "N2":
+        # no adsorption is assumed of N2 in this adsorbent
+        loading[i] = 1e-10 * units.mol / units.kg
+
+    return loading[i]
+
+
+def add_Henry_parameters(blk):
+    """
+    Method for adding parameters of the Langmuir isotherm model.
+    """
+
+    blk.Henry_b0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 1e-10, "N2": 0.0},
+        units=units.Pa**-1,
+        doc="Henry b0 (pre-exponential)",
+    )
+    blk.Henry_E = Param(
+        blk.isotherm_components,
+        initialize={"CO2": -35.0, "N2": 0.0},
+        units=units.kJ / units.mol,
+        doc="Henry E",
+    )
+
+
+def Henry_isotherm(blk, i, pressure, temperature):
+    """
+    Method to add isotherm for components.
+    Isotherm equation: Henry
+
+    NOTE: CO2 is considered as the only adsorbing component
+
+    Keyword Arguments:
+        i : component
+        pressure : partial pressure of components
+        temperature : temperature
+
+    """
+
+    T = temperature
+    p = {}
+    loading = {}
+
+    for j in blk.isotherm_components:
+        p[j] = units.convert(pressure[j], to_units=units.Pa)
+
+    if i == "CO2":
+
+        affinity = blk.Henry_b0[i] * exp(
+            units.convert(-blk.Henry_E[i], to_units=units.J / units.mol)
+            / const.gas_constant
+            / T
+        )
+
+        loading[i] = affinity * p[i]
+
+    elif i == "N2":
+        # no adsorption is assumed of N2 in this adsorbent
+        loading[i] = 1e-10 * units.mol / units.kg
+
+    return loading[i]
+
+
 def add_Langmuir_parameters(blk):
     """
     Method for adding parameters of the Langmuir isotherm model.
@@ -582,7 +713,6 @@ def Toth_isotherm(blk, i, pressure, temperature):
     """
     Method to add isotherm for components.
     Isotherm equation: Toth isotherm
-    Adsorbent: polystyrene functionalized with primary amine
 
     NOTE: the affinity of the material towards CO2 is not reduced by
           neither N2 nor H2O. N2 adsorption is negligible in

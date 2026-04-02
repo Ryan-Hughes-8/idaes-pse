@@ -110,13 +110,13 @@ class IsothermModel(Enum):
     """
 
     none = 0
-    Langmuir = 1  # note functional yet
+    Langmuir = 1
     dual_site_Langmuir = 2
     weighted_DSL = 3
     extended_Sips = 4
     Toth = 5
-    Henry = 6  # note functional yet
-    Langmuir_Freundlich = 7  # note functional yet
+    Henry = 6
+    Langmuir_Freundlich = 7
 
 
 class SteamCalculationType(Enum):
@@ -176,7 +176,9 @@ model must be specified when custom sorbent is declared.
 - IsothermModel.dual_site_Langmuir
 - IsothermModel.weighted_DSL
 - IsothermModel.extended_Sips
-- IsothermModel.Toth""",
+- IsothermModel.Toth
+- IsothermModel.Henry
+- IsothermModel.Langmuir_Freundlich""",
         ),
     )
     CONFIG.declare(
@@ -409,7 +411,6 @@ The property package must be iapws95.
         elif self.config.adsorbent == Adsorbent.custom:
             self._add_parameters_custom()
             if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                # self._add_dual_site_Langmuir_parameters()
                 add_dual_site_Langmuir_parameters(blk=self)
             elif self.config.isotherm_model == IsothermModel.extended_Sips:
                 add_extended_Sips_parameters(blk=self)
@@ -419,6 +420,10 @@ The property package must be iapws95.
                 add_Toth_parameters(blk=self)
             elif self.config.isotherm_model == IsothermModel.Langmuir:
                 add_Langmuir_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.Henry:
+                add_Henry_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
+                add_Langmuir_Freundlich_parameters(blk=self)
 
         # add design and operating variables
         self.flow_mol_in_total = Var(
@@ -2158,6 +2163,10 @@ The property package must be iapws95.
                 return Toth_isotherm(self, i, pressure, temperature)
             elif self.config.isotherm_model == IsothermModel.Langmuir:
                 return Langmuir_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.Henry:
+                return Henry_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
+                return Langmuir_Freundlich_isotherm(self, i, pressure, temperature)
 
     # TODO: develop a property package framework for adsorbents
     def _isotherm_zeolite_13x(self, i, pressure, temperature):
