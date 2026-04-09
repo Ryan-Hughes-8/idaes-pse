@@ -3,604 +3,545 @@
 # Framework (IDAES IP) was produced under the DOE Institute for the
 # Design of Advanced Energy Systems (IDAES).
 #
-# Copyright (c) 2018-2026 by the software owners: The Regents of the
+# Copyright (c) 2018-2023 by the software owners: The Regents of the
 # University of California, through Lawrence Berkeley National Laboratory,
 # National Technology & Engineering Solutions of Sandia, LLC, Carnegie Mellon
 # University, West Virginia University Research Corporation, et al.
 # All rights reserved.  Please see the files COPYRIGHT.md and LICENSE.md
 # for full copyright and license information.
 #################################################################################
-"""
-Costing models for a direct air capture (DAC) plant. The fixed-bed temperature
-swing adsorption model used to represent the DAC process should be passed as an
-argument to the costing functions.
-"""
-
-__author__ = "Daison Yancy Caballero"
-
-import os
+""" """
 import json
-import textwrap
-from sys import stdout
-from pandas import DataFrame
 
-from pyomo.environ import units, Var, value
-from pyomo.common.fileutils import this_file_dir
-from pyomo.util.calc_var_value import calculate_variable_from_constraint
+# import pytest
+import pandas as pd
+from pyomo.environ import (
+    Block,
+    check_optimal_termination,
+    ConcreteModel,
+    Constraint,
+    Param,
+    units,
+    value,
+    Var,
+    Expression,
+)
+from pyomo.util.check_units import assert_units_consistent
+from pyomo.common.config import ConfigValue
 
-from idaes.core import UnitModelBlock, UnitModelCostingBlock
-from idaes.core.util.exceptions import ConfigurationError
-from idaes.core.util.tables import stream_table_dataframe_to_string
-from idaes.core.util.math import smooth_max
-import idaes.logger as idaeslog
+from idaes.core import FlowsheetBlock, UnitModelBlock, UnitModelCostingBlock
+from idaes.core.solvers import get_solver
+from idaes.core.util.model_statistics import degrees_of_freedom
+
+
+from idaes.models.properties import iapws95
+
 
 from idaes.models_extra.power_generation.costing.power_plant_capcost import (
     QGESSCosting,
     QGESSCostingData,
 )
+import pyomo.environ as pyo
 
-directory = this_file_dir()
-_log = idaeslog.getLogger(__name__)
+vacuum_pump_params = {
+    "9": {
+        "B": {
+            "vac_2.9_eq1": {
+                "Account Name": "Vacuum pump quote for 2.9 psia",
+                "Exponent": 0.45,
+                "Process Parameter": "CO2 Flowrate",
+                "BEC": 47.8e6 / 1e3,  # 46e6/1e3,  # BEC in $1000 dollars
+                "BEC_units": "K$2018",
+                "Eng Fee": 0.2,
+                "Process Contingency": 0.18,
+                "Project Contingency": 0.2,
+                "RP Value": 77.00,
+                "Units": "MW",
+            },
+            "vac_6.5_eq1": {
+                "Account Name": "Vacuum pump quote for 6.5 psia",
+                "Exponent": 0.45,
+                "Process Parameter": "Absorber volume",
+                "BEC": 18.71e3,  # 18e6 / 1e3,
+                "BEC_units": "K$2018",
+                "Eng Fee": 0.2,
+                "Process Contingency": 0.18,
+                "Project Contingency": 0.2,
+                "RP Value": 63.00,
+                "Units": "MW",
+            },
+        }
+    }
+}
 
 
-def _nonneg(expr, unit):
-    """
-    Return a smooth nonnegative version of expr with the given units.
-    """
-    return smooth_max(0, units.convert(expr, to_units=unit) / unit) * unit
-
-
-def _warn_if_negative(expr, name):
-    try:
-        v = value(expr)
-    except Exception:
-        return
-    if v < 0:
-        _log.warning(
-            "%s is negative (%.6g). Clamping to zero for costing stability.",
-            name,
-            v,
-        )
-
-
-def get_dac_costing(tsa, costing_case="electric_boiler"):
-    if costing_case == "electric_boiler":
-        _get_costing_electric_boiler(tsa)
-    elif costing_case == "retrofit_ngcc":
-        _get_costing_retrofit_ngcc(tsa)
+def get_dac_costing_data(case):
+    if case == "electric_boiler":
+        fname = "dac_eb_costing_data.json"
+    elif case == "retrofit_NGCC":
+        fname = "dac_retrofit_costing_data.json"
     else:
-        raise ConfigurationError("costing case not defined.")
+        print("Invalid case")
+
+    with open(fname, "r") as f:
+        costing_data = json.load(f)
+
+    return costing_data
 
 
-def _get_costing_electric_boiler(tsa):
+def get_dac_costing(unit, costing_case):
+    # capital costs
+    dac_cost_params = get_dac_costing_data(costing_case)
 
-    # load custom costing parameters
-    with open(
-        os.path.join(directory, "costing_params_dac_electric_boiler.json"), "r"
-    ) as f:
-        costing_params = json.load(f)
+    unit.costing = QGESSCosting()
+    CE_index_year = "2018"
+    CE_index_units = getattr(units, "MUSD_" + CE_index_year)
 
-    # get flowsheet
-    fs = tsa.flowsheet()
+    # add a var to account for multiple DAC units
+    unit.number_of_units = Var(initialize=1, bounds=(0, 100))
+    unit.number_of_units.fix(1)
 
-    # create costing block
-    fs.costing = QGESSCosting()
+    if costing_case == "electric_boiler":
+        unit.raw_water_system = UnitModelBlock()
+        unit.raw_water_system.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["3.2", "3.4", "9.5", "14.6"],
+                "scaled_param": unit.raw_water_withdrawal[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
 
-    # EPAT accounts for:
-    # 1) Sorbent Handling, 2) Sorbent Preparation & Feed,
-    # 3) Feedwater & Miscellaneous Bop Systems, 9) Cooling Water System,
-    # 10) Ash/Spent Sorbent Handling System, 11) Accessory Electric Plant
-    # 12) Instrumentation & Control, 13) Improvements to Site,
-    # 14) Buildings & Structures, 15) DAC system
+        unit.steam_system = UnitModelBlock()
+        unit.steam_system.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["3.1", "3.3", "3.5"],
+                "scaled_param": unit.steam_flow_mass[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
 
-    # grouping accounts
-    sorbent_makeup_accounts = [
-        "1.5",
-        "1.6",
-        "1.7",
-        "1.8",
-        "1.9",
-        "2.5",
-        "2.6",
-        "2.9",
-        "10.6",
-        "10.7",
-        "10.9",
-    ]
-    raw_water_withdrawal_accounts = ["3.2", "3.4", "9.5", "14.6"]
-    steam_accounts = ["3.1", "3.3", "3.5"]
-    process_water_discharge_accounts = ["3.7"]
-    cooling_tower_accounts = ["9.1"]
-    circulating_water_accounts = ["9.2", "9.3", "9.4", "9.6", "9.7", "14.5"]
-    total_auxiliary_load_accounts = [
-        "11.1",
-        "11.2",
-        "11.3",
-        "11.4",
-        "11.5",
-        "11.6",
-        "11.7",
-        "11.8",
-        "11.9",
-        "12.4",
-        "12.5",
-        "12.6",
-        "12.7",
-        "12.8",
-        "12.9",
-        "13.1",
-        "13.2",
-        "13.3",
-        "14.4",
-        "14.7",
-        "14.8",
-        "14.9",
-        "14.10",
-    ]
-    dac_system_accounts = [
-        "15.1",
-        "15.2",
-        "15.3",
-        "15.4",
-        "15.5",
-        "15.6",
-        "15.7",
-        "15.8",
-        "15.9",
-    ]
+        unit.cooling_tower = UnitModelBlock()
+        unit.cooling_tower.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["9.1"],
+                "scaled_param": unit.cooling_tower_duty[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
 
-    # reference parameters for accounts
-    # sorbent makeup rate - from model
-    sorbent_makeup_rate = (
-        units.convert(tsa.bed_volume, to_units=units.ft**3)
-        * (1 - tsa.bed_voidage)
-        * tsa.number_beds
-        / 0.5
-        / 365
-        / units.d
-    )  # [ft^3/d]
-    # CO2 product mass flow rate - from model
-    CO2_product_mass_flow = units.convert(
-        tsa.mw["CO2"] * tsa.flow_mol_co2_rich_stream[0, "CO2"],
-        to_units=units.lb / units.hr,
-    )  # [lb/hr]
-    # raw water withdrawal flow rate - from surrogates
-    raw_water_withdrawal = (
-        (1.0496e-03 * CO2_product_mass_flow * units.hr / units.lb + 5.3359e01)
-        * units.gal
-        / units.min
-    )  # [gpm]
-    # process water discharge flow rate - from surrogates
-    process_water_discharge = (
-        (5.4007e-04 * CO2_product_mass_flow * units.hr / units.lb + 1.2000e01)
-        * units.gal
-        / units.min
-    )  # [gpm]
-    # cooling tower heat duty - from surrogates
-    cooling_tower_duty = (
-        (3.0797e-04 * CO2_product_mass_flow * units.hr / units.lb + 2.5000e01)
-        * units.MBtu
-        / units.hr
-    )  # [MMBtu/hr]
-    # circulating water flow_rate - from surrogates
-    circulating_water_flow_rate = (
-        (3.0797e-02 * CO2_product_mass_flow * units.hr / units.lb + 2.5000e03)
-        * units.gal
-        / units.min
-    )  # [gpm]
-    # mole flow rate of dac feed - from model (exhaust or air)
-    flow_mol_inlet = units.convert(
-        tsa.flow_mol_in_total, to_units=units.kmol / units.hr
-    )  # [kmol/hr]
-    # compressor auxiliary load - from surrogates
-    _pcal_dimless = 0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
-    _warn_if_negative(_pcal_dimless, "product_compressor_auxiliary_load surrogate")
-    product_compressor_auxiliary_load = smooth_max(0, _pcal_dimless) * units.kW  # [kW]
-    # boiler auxiliary load - from surrogates
-    boiler_auxiliary_load = _nonneg(
-        0.000335999
-        * units.convert(tsa.flow_mass_steam, to_units=units.lb / units.hr)
-        * units.hr
-        / units.lb
-        * 1e3
-        * units.kW,
-        units.kW,
-    )  # convert MW to kW
-    # total auxiliary load
-    # calculate with fans work + compressor for CO2 pure + boiler aux load
-    total_auxiliary_load = _nonneg(
-        product_compressor_auxiliary_load
-        + boiler_auxiliary_load
-        + units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW),
-        units.kW,
-    )
-    # compressor aftercooler heat exchanger duty - from surrogates
-    _cahd_dimless = 2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8
-    _warn_if_negative(_cahd_dimless, "compressor_aftercooler_heat_duty surrogate")
-    compressor_aftercooler_heat_duty = (
-        smooth_max(0, _cahd_dimless) * units.MBtu / units.hr
-    )  # [MMBtu/hr]
-    # auxiliary load for 2 beds (pressure changer from TSA model estimates
-    # the power required to move air or exhaust gas to all beds)
-    auxiliary_load_2_beds = _nonneg(
-        2
-        * units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW)
-        / tsa.number_beds,
-        units.kW,
-    )  # [kW]
+        unit.water_discharge_system = UnitModelBlock()
+        unit.water_discharge_system.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["3.7"],
+                "scaled_param": unit.process_water_discharge[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
 
-    # sorbent makeup accounts
-    fs.sorbent_makeup = UnitModelBlock()
-    fs.sorbent_makeup.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+        unit.cooling_water_system = UnitModelBlock()
+        unit.cooling_water_system.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["9.2", "9.3", "9.4", "9.6", "9.7", "14.5"],
+                "scaled_param": unit.circulating_water_flowrate[0]
+                * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
+
+        unit.electric_systems = UnitModelBlock()
+        unit.electric_systems.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": [
+                    "11.1",
+                    "11.2",
+                    "11.3",
+                    "11.4",
+                    "11.5",
+                    "11.6",
+                    "11.7",
+                    "11.8",
+                    "11.9",
+                    "12.4",
+                    "12.5",
+                    "12.6",
+                    "12.7",
+                    "12.8",
+                    "12.9",
+                    "13.1",
+                    "13.2",
+                    "13.3",
+                    "14.4",
+                    "14.7",
+                    "14.8",
+                    "14.9",
+                    "14.10",
+                ],
+                "scaled_param": unit.auxiliary_load[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
+
+        # Electric Boiler 15.9
+        unit.electric_boiler = UnitModelBlock()
+        unit.electric_boiler.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["15.9"],
+                "scaled_param": unit.steam_flow_mass[0],
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
+
+    elif costing_case == "retrofit_NGCC":
+        unit.steam_flow_system = UnitModelBlock()
+        unit.steam_flow_system.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["8.4"],
+                "scaled_param": unit.steam_flow_mass[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
+
+        unit.electric_systems = UnitModelBlock()
+        unit.electric_systems.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["11.2", "11.3", "11.4", "11.5", "11.6"],
+                "scaled_param": unit.auxiliary_load[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
+
+    unit.vessels = UnitModelBlock()
+    unit.vessels.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": sorbent_makeup_accounts,
-            "scaled_param": sorbent_makeup_rate,
+            "cost_accounts": ["15.1"],
+            "scaled_param": units.convert(unit.bed_volume, to_units=units.ft**3),
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
-    # raw water withdrawal accounts
-    fs.raw_water_withdrawal = UnitModelBlock()
-    fs.raw_water_withdrawal.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": raw_water_withdrawal_accounts,
-            "scaled_param": raw_water_withdrawal,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # steam accounts
-    fs.steam = UnitModelBlock()
-    fs.steam.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": steam_accounts,
-            "scaled_param": units.convert(
-                tsa.flow_mass_steam, to_units=units.lb / units.hr
-            ),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # process water discharge accounts
-    fs.process_water_discharge = UnitModelBlock()
-    fs.process_water_discharge.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": process_water_discharge_accounts,
-            "scaled_param": process_water_discharge,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # cooling tower accounts
-    fs.cooling_tower = UnitModelBlock()
-    fs.cooling_tower.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": cooling_tower_accounts,
-            "scaled_param": cooling_tower_duty,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # circulating water accounts
-    fs.circulating_water = UnitModelBlock()
-    fs.circulating_water.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": circulating_water_accounts,
-            "scaled_param": circulating_water_flow_rate,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # total plant auxiliary load accounts
-    fs.total_auxiliary_load = UnitModelBlock()
-    fs.total_auxiliary_load.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": total_auxiliary_load_accounts,
-            "scaled_param": total_auxiliary_load,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # get EPAT costing accounts for 15) DAC system
-    accounts_info = {}
-    for k, v in costing_params["8"]["B"].items():
-        if k in dac_system_accounts:
-            accounts_info[k] = v["Account Name"].replace("DAC ", "")
-    accounts = list(accounts_info.keys())
-
-    # 15.1 - DAC adsorption/desorption vessels (cost of 120 vessels)
-    vessels_account = [accounts[0]]
-    fs.vessels = UnitModelBlock()
-    fs.vessels.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": vessels_account,
-            "scaled_param": units.convert(tsa.bed_volume, to_units=units.ft**3),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
+    purge_pressure = unit.config.purge_pressure
     # 15.2 - DAC CO2 Compression & Drying
-    product_compression_account = [accounts[1]]
-    fs.product_compression = UnitModelBlock()
-    fs.product_compression.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": product_compression_account,
-            "scaled_param": product_compressor_auxiliary_load,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
+    unit.product_compression = UnitModelBlock()
+    if purge_pressure == 1:
+        unit.product_compression.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["15.2"],
+                "scaled_param": unit.compressor_power[0] * unit.number_of_units,
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": dac_cost_params,
+            },
+        )
+
+    elif purge_pressure == 0.2:
+        unit.product_compression.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["vac_2.9_eq1"],
+                "scaled_param": unit.compressor_power[0] * unit.number_of_units,
+                "tech": 9,
+                "ccs": "B",
+                "additional_costing_params": vacuum_pump_params,
+            },
+        )
+
+    elif purge_pressure == 0.5:
+        unit.product_compression.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=unit.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["vac_6.5_eq1"],
+                "scaled_param": unit.compressor_power[0] * unit.number_of_units,
+                "units": "MW",
+                "tech": 9,
+                "ccs": "B",
+                "additional_costing_params": vacuum_pump_params,
+            },
+        )
 
     # 15.3 - DAC CO2 Compressor Aftercooler
-    compressor_aftercooler_account = [accounts[2]]
-    fs.compressor_aftercooler = UnitModelBlock()
-    fs.compressor_aftercooler.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+    unit.compressor_aftercooler = UnitModelBlock()
+    unit.compressor_aftercooler.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": compressor_aftercooler_account,
-            "scaled_param": compressor_aftercooler_heat_duty,
+            "cost_accounts": ["15.3"],
+            "scaled_param": unit.compressor_aftercooler_heat_duty[0]
+            * unit.number_of_units,
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
-    # 15.4 - DAC System Air Handling Duct and Dampers
-    duct_dampers_account = [accounts[3]]
-    fs.duct_dampers = UnitModelBlock()
-    fs.duct_dampers.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+    # 15.4 - DAC System Air Handling Duct and Dampers (1 system per 2 beds)
+    unit.duct_dampers = UnitModelBlock()
+    unit.duct_dampers.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": duct_dampers_account,
-            "scaled_param": 2
-            * units.convert(tsa.flow_mass_in_total_bed, to_units=units.lb / units.hr),
+            "cost_accounts": ["15.4"],
+            "scaled_param": (unit.air_flow_mass[0] / unit.num_beds_total * 2),
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
-    # 15.5 - DAC System Air Handling Fans
-    feed_fans_account = [accounts[4]]
-    fs.feed_fans = UnitModelBlock()
-    fs.feed_fans.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+    # 15.5 - DAC System Air Handling Fans (1 system per 2 beds)
+    unit.feed_fans = UnitModelBlock()
+    unit.feed_fans.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": feed_fans_account,
-            "scaled_param": auxiliary_load_2_beds,
+            "cost_accounts": ["15.5"],
+            "scaled_param": unit.fans.work_mechanical[0] / unit.num_beds_total * 2,
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
-    # 15.6 - DAC Desorption Process Gas Handling System
-    desorption_gas_handling_account = [accounts[5]]
-    fs.desorption_gas_handling = UnitModelBlock()
-    fs.desorption_gas_handling.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+    # 15.6 - DAC Desorption Process Gas Handling System (pure CO2 gas)
+    unit.desorption_gas_handling = UnitModelBlock()
+    unit.desorption_gas_handling.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": desorption_gas_handling_account,
-            "scaled_param": CO2_product_mass_flow,
+            "cost_accounts": ["15.6"],
+            "scaled_param": unit.co2_flow_mass[0],
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
     # 15.7 - DAC Steam Distribution System
-    steam_distribution_account = [accounts[6]]
-    fs.steam_distribution = UnitModelBlock()
-    fs.steam_distribution.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+    unit.steam_distribution = UnitModelBlock()
+    unit.steam_distribution.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": steam_distribution_account,
-            "scaled_param": units.convert(
-                tsa.flow_mass_steam, to_units=units.lb / units.hr
-            ),
+            "cost_accounts": ["15.7"],
+            "scaled_param": unit.steam_flow_mass[0],
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
     # 15.8 - DAC System Controls Equipment
-    controls_equipment_account = [accounts[7]]
-    fs.controls_equipment = UnitModelBlock()
-    fs.controls_equipment.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
+    unit.controls_equipment = UnitModelBlock()
+    unit.controls_equipment.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
-            "cost_accounts": controls_equipment_account,
-            "scaled_param": total_auxiliary_load,
+            "cost_accounts": ["15.8"],
+            "scaled_param": unit.auxiliary_load[0],
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": costing_params,
+            "additional_costing_params": dac_cost_params,
         },
     )
 
-    # 15.9 - Electric Boiler
-    electric_boiler_account = [accounts[8]]
-    fs.electric_boiler = UnitModelBlock()
-    fs.electric_boiler.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": electric_boiler_account,
-            "scaled_param": units.convert(
-                tsa.flow_mass_steam, to_units=units.lb / units.hr
-            ),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
+    # # Electric Boiler 15.9
+    # unit.electric_boiler = UnitModelBlock()
+    # unit.electric_boiler.costing = UnitModelCostingBlock(
+    #     flowsheet_costing_block=unit.costing,
+    #     costing_method=QGESSCostingData.get_PP_costing,
+    #     costing_method_arguments={
+    #         "cost_accounts": ["15.9"],
+    #         "scaled_param": unit.steam_flow_mass[0],
+    #         "tech": 8,
+    #         "ccs": "B",
+    #         "additional_costing_params": dac_cost_params,
+    #     },
+    # )
+
+    # we need a custom method of calculating the total TPC to account for distributed vs centralized systems
+    distributed_systems = [
+        unit.vessels.costing,
+        unit.duct_dampers.costing,
+        unit.feed_fans.costing,
+        unit.desorption_gas_handling.costing,
+        unit.controls_equipment.costing,
+    ]
+
+    centralized_TPCs = []
+
+    for b in unit.costing._registered_unit_costing:
+        if b not in distributed_systems:
+            for key in b.total_plant_cost.keys():
+                centralized_TPCs.append(b.total_plant_cost[key])
+
+    unit.costing.total_TPC = Var(
+        initialize=100,
+        bounds=(0, 1e4),
+        doc="total TPC in $MM",
     )
 
-    # total plant cost
-    TPC_list = {}
-    for o in fs.component_objects(descend_into=True):
-        # look for costing blocks
-        if hasattr(o, "costing") and hasattr(o.costing, "total_plant_cost"):
-            for k in o.costing.total_plant_cost.keys():
-                if k not in ["15.1", "15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k]
-                if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * tsa.number_beds
-                if k in ["15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * tsa.number_beds / 2
+    @unit.costing.Constraint()
+    def total_TPC_eq(b):
+        return (
+            b.total_TPC
+            == sum(centralized_TPCs)
+            + (
+                unit.vessels.costing.total_plant_cost["15.1"]
+                / 120
+                * unit.num_beds_total
+                + unit.duct_dampers.costing.total_plant_cost["15.4"]
+                * unit.num_beds_total
+                / 2
+                + unit.feed_fans.costing.total_plant_cost["15.5"]
+                * unit.num_beds_total
+                / 2
+                + unit.desorption_gas_handling.costing.total_plant_cost["15.6"]
+                + unit.controls_equipment.costing.total_plant_cost["15.8"]
+            )
+            * unit.number_of_units
+        )
 
-    # Total plant cost of dac unit
-    @fs.costing.Expression(doc="total TPC for TSA system in $MM")
-    def total_TPC(b):
-        return sum(TPC_list.values())
-
-    # build variable costs components
-
-    # gallon/day of water required
-    water_rate = (
-        units.convert(tsa.flow_mol_in_total, to_units=units.kmol / units.hr)
-        * units.hr
-        / units.kmol
-        * 60792.407
-        / 1629629
-        * units.gallon
-        / units.day
-    )
-    # ton/day of water_chems required
-    water_chems_rate = (
-        units.convert(tsa.flow_mol_in_total, to_units=units.kmol / units.hr)
-        * units.hr
-        / units.kmol
-        * 0.1811
-        / 1629629
-        * units.ton
-        / units.day
-    )
-    # ft^3/day of sorbent required
-    sorbent_rate = (
-        units.convert(tsa.bed_volume, to_units=units.ft**3)
-        * (1 - tsa.bed_voidage)
-        * tsa.number_beds
-        / 0.5
-        / 365
-        / units.day
-    )
-    # kW/day of aux_power required
-    aux_power_rate = total_auxiliary_load * 24 / units.day
-
-    # kg/day of steam required
-    steam_rate = units.convert(tsa.flow_mass_steam, to_units=units.kg / units.day)
-
-    # variables for rates
-    fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
-    fs.costing.water = Var(fs.time, initialize=1.0, units=units.gallon / units.day)
-    fs.costing.water_chems = Var(fs.time, initialize=1.0, units=units.ton / units.day)
-    fs.costing.sorbent = Var(fs.time, initialize=1.0, units=units.ft**3 / units.day)
-    fs.costing.aux_power = Var(fs.time, initialize=1.0, units=units.kW / units.day)
-    fs.costing.steam = Var(fs.time, initialize=1.0, units=units.kg / units.day)
-
-    # constraints for rates
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of water")
-    def water_eq(b, t):
-        return b.water[t] == water_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of water_chems")
-    def water_chems_eq(b, t):
-        return b.water_chems[t] == water_chems_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of sorbent")
-    def sorbent_eq(b, t):
-        return b.sorbent[t] == sorbent_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of aux_power")
-    def aux_power_eq(b, t):
-        return b.aux_power[t] == aux_power_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of steam")
-    def steam_eq(b, t):
-        return b.steam[t] == steam_rate
-
-    fs.costing.steam_eq.deactivate()
-    fs.costing.steam.fix(0.0)
-
-    fs.costing.net_power.fix()
-
-    # resources to be costed
+    # resorces to be costed
     resources = [
         "water",
         "water_treatment_chemicals",
-        "sorbent",
         "aux_power",
+        "sorbent",
         "waste_sorbent",
-        "IP_steam",
+        "boiler_feed_water",
     ]
+    if costing_case == "retrofit_NGCC":
+        resources.append("IP_steam")
+
+    # resource consumption rates for variable costing
+    capacity_factor = 0.85
+
+    @unit.costing.Expression(unit.time)
+    def water_use(b, t):
+        # water use is lineraly scaled from NETL reference
+        ref_water = 60792.407 * units.gal / units.day
+        ref_air = 1629629 * units.kmol / units.hr
+        return unit.air_flow_mol[t] * (ref_water / ref_air) * unit.number_of_units
+
+    @unit.costing.Expression(unit.time)
+    def water_treatment_chems(b, t):
+        # treatment chemical use is lineraly scaled from NETL reference
+        ref_chem = 0.1811 * units.ton / units.day
+        ref_air = 1629629 * units.kmol / units.hr
+        return unit.air_flow_mol[t] * (ref_chem / ref_air) * unit.number_of_units
+
+    @unit.costing.Expression(unit.time)
+    def energy_purchased(b, t):  # in kWh/day
+        hr_per_day = 24 * units.hr / units.day
+        return unit.auxiliary_load[t] * hr_per_day * unit.number_of_units
+
+    @unit.costing.Expression(unit.time)
+    def sorbent_rate(b, t):
+        return (
+            units.convert(unit.bed_volume, to_units=units.ft**3)
+            * (1 - unit.bed_voidage)
+            * unit.num_beds_total
+            / unit.config.sorbent_lifespan
+            / 365
+            / units.day
+        )
+
+    @unit.costing.Expression(unit.time)
+    def bfw_rate(b, t):
+        hr_per_day = 24 * units.hr / units.day
+        return unit.BFW_makeup[t] * hr_per_day
+
+    @unit.costing.Expression(unit.time)
+    def steam_rate(b, t):
+        hr_per_day = 24 * units.hr / units.day
+        return (
+            units.convert(unit.steam_flow_mass[t], to_units=units.kg / units.hr)
+            * hr_per_day
+        )
 
     # vars for resource consumption rates
     rates = [
-        fs.costing.water,
-        fs.costing.water_chems,
-        fs.costing.sorbent,
-        fs.costing.aux_power,
-        fs.costing.sorbent,
-        fs.costing.steam,
+        unit.costing.water_use,
+        unit.costing.water_treatment_chems,
+        unit.costing.energy_purchased,
+        unit.costing.sorbent_rate,
+        unit.costing.sorbent_rate,
+        unit.costing.bfw_rate,
     ]
+    if costing_case == "retrofit_NGCC":
+        rates.append(unit.costing.steam_rate)
 
     # resource prices
     prices = {
-        "sorbent": 201 * units.USD_2018 / units.ft**3,
-        "aux_power": 0.06 * units.USD_2018 / units.kW,
+        "sorbent": 4 * units.USD_2018 / units.ft**3,  # 4 or 100
+        "aux_power": 0.06 * units.USD_2018 / units.kWh,
         "waste_sorbent": 0.86 * units.USD_2018 / units.ft**3,
         "IP_steam": 0.00733 * units.USD_2018 / units.kg,
+        "boiler_feed_water": 2.45
+        / 1000
+        * units.USD_2018
+        / units.kg,  # Turton et al., 2012
     }
 
-    # land cost for total overnight cost
-    @fs.costing.Expression(doc="Land Cost [$MM]")
-    def land_cost_exp(b):
-        return (156000 * (tsa.number_beds / 120) ** (0.78)) * 1e-6  # scaled to Millions
+    @unit.costing.Expression()
+    def land_cost1(b):
+        return (
+            156000 * (unit.num_beds_total / 120) ** (0.78)
+        ) * 1e-6  # scaled to Millions
 
-    # build fixed and variables O&M cost
-    fs.costing.build_process_costs(
-        net_power=fs.costing.net_power,
+    @unit.costing.Expression()
+    def tonne_CO2_capture(b):
+        # return unit.co2_flow_mass[0] / 2204.62 * 8760 * unit.number_of_units
+        return (
+            units.convert(unit.co2_flow_mass[0], to_units=units.tonne / units.year)
+            * unit.number_of_units
+        )
+
+    unit.costing.build_process_costs(
+        net_power=None,
         # arguments related to fixed OM costs
         total_plant_cost=True,
         labor_rate=38.50,
@@ -610,578 +551,78 @@ def _get_costing_electric_boiler(tsa):
         fixed_OM=True,
         # arguments related owners costs
         variable_OM=True,
-        land_cost=fs.costing.land_cost_exp,
+        capacity_factor=capacity_factor,
+        land_cost=unit.costing.land_cost1,
         resources=resources,
         rates=rates,
         prices=prices,
         fuel=None,
-        tonne_CO2_capture=tsa.total_CO2_captured_year,
+        waste=None,
+        chemicals=None,
+        tonne_CO2_capture=unit.costing.tonne_CO2_capture,
     )
 
-    # electric boiler emissions
-    @fs.Expression(doc="Electric Boiler Emissions [mol/s]")
-    def emissions_electric_boiler(b):
-        # eq. emissions for a US average electricity grid - kgCO2e/MWh
-        equi_emissions = 425.021
-        return total_auxiliary_load * 1e-3 * equi_emissions * 1000 / 3600 / 44.01
+    # we want the number of operators to depend on the number of units
+    unit.costing.operators_per_shift_var = Var(initialize=8, bounds=(0, 200))
 
-    @fs.Expression(doc="Electric Boiler Emissions, PV electricity grid [mol/s]")
-    def emissions_electric_boiler_pv(b):
-        # eq. emissions for solar PV electricity grid - kgCO2e/MWh
-        equi_emissions = 48.472
-        return total_auxiliary_load * 1e-3 * equi_emissions * 1000 / 3600 / 44.01
+    @unit.costing.Constraint()
+    def operator_eqn(b):
+        return b.operators_per_shift_var == 8 * unit.number_of_units
 
-    # initialization
-    for c in fs.costing._registered_unit_costing:
-        for key in c.bare_erected_cost.keys():
-            calculate_variable_from_constraint(
-                c.bare_erected_cost[key],
-                c.bare_erected_cost_eq[key],
-            )
-            calculate_variable_from_constraint(
-                c.total_plant_cost[key],
-                c.total_plant_cost_eq[key],
-            )
-    calculate_variable_from_constraint(fs.costing.water[0], fs.costing.water_eq[0])
-    calculate_variable_from_constraint(
-        fs.costing.water_chems[0], fs.costing.water_chems_eq[0]
-    )
-    calculate_variable_from_constraint(fs.costing.sorbent[0], fs.costing.sorbent_eq[0])
-    calculate_variable_from_constraint(
-        fs.costing.aux_power[0], fs.costing.aux_power_eq[0]
-    )
-    fs.costing.initialize_fixed_OM_costs()
-    fs.costing.initialize_variable_OM_costs()
+    unit.costing.annual_labor_cost_rule.deactivate()
 
-
-def _get_costing_retrofit_ngcc(tsa):
-
-    # load custom costing parameters
-    with open(
-        os.path.join(directory, "costing_params_dac_retrofit_ngcc.json"), "r"
-    ) as f:
-        costing_params = json.load(f)
-
-    # get flowsheet
-    fs = tsa.flowsheet()
-
-    # create costing block
-    fs.costing = QGESSCosting()
-
-    # EPAT accounts for: 1) Sorbent Handling,
-    # 2) Sorbent Preparation & Feed,
-    # 7) HRSG, Ductwork & Stack, 8) Steam Turbine & Accessories
-    # 10) Ash/Spent Sorbent Handling System, 11) Accessory Electric Plant
-    # 12) Instrumentation & Control, 15) DAC system
-
-    # grouping accounts
-    sorbent_makeup_accounts = [
-        "1.5",
-        "1.6",
-        "1.7",
-        "1.8",
-        "1.9",
-        "2.5",
-        "2.6",
-        "2.9",
-        "10.6",
-        "10.7",
-        "10.9",
-    ]
-    gas_flow_to_dac_accounts = ["7.3"]
-    steam_accounts = ["8.4"]
-    total_auxiliary_load_accounts = [
-        "11.2",
-        "11.3",
-        "11.4",
-        "11.5",
-        "11.6",
-        "12.1",
-        "12.2",
-        "12.3",
-        "12.4",
-        "12.5",
-        "12.6",
-        "12.7",
-        "12.8",
-        "12.9",
-    ]
-    dac_system_accounts = [
-        "15.1",
-        "15.2",
-        "15.3",
-        "15.4",
-        "15.5",
-        "15.6",
-        "15.7",
-        "15.8",
-    ]
-
-    # reference parameters for accounts
-    # sorbent makeup rate - from model
-    sorbent_makeup_rate = (
-        units.convert(tsa.bed_volume, to_units=units.ft**3)
-        * (1 - tsa.bed_voidage)
-        * tsa.number_beds
-        / 0.5
-        / 365
-        / units.d
-    )  # [ft^3/d]
-    # CO2 product mass flow rate - from model
-    CO2_product_mass_flow = units.convert(
-        tsa.mw["CO2"] * tsa.flow_mol_co2_rich_stream[0, "CO2"],
-        to_units=units.lb / units.hr,
-    )  # [lb/hr]
-    # mole flow rate of dac feed - from model (exhaust or air)
-    flow_mol_inlet = units.convert(
-        tsa.flow_mol_in_total, to_units=units.kmol / units.hr
-    )  # [kmol/hr]
-    # mass flow rate of dac feed - from model (exhaust or air)
-    flow_mass_inlet = units.convert(
-        tsa.flow_mass_in_total, to_units=units.lb / units.hr
-    )  # [lb/hr]
-    # compressor auxiliary load - from surrogates
-    _pcal_dimless = 0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
-    _warn_if_negative(_pcal_dimless, "product_compressor_auxiliary_load surrogate")
-    product_compressor_auxiliary_load = smooth_max(0, _pcal_dimless) * units.kW  # [kW]
-    # total auxiliary load
-    # calculate with fans work + compressor for CO2 pure
-    total_auxiliary_load = _nonneg(
-        product_compressor_auxiliary_load
-        + units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW),
-        units.kW,
-    )
-    # compressor aftercooler heat exchanger duty - from surrogates
-    _cahd_dimless = 2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8
-    _warn_if_negative(_cahd_dimless, "compressor_aftercooler_heat_duty surrogate")
-    compressor_aftercooler_heat_duty = (
-        smooth_max(0, _cahd_dimless) * units.MBtu / units.hr
-    )  # [MMBtu/hr]
-    # auxiliary load for 2 beds (pressure changer from TSA model estimates
-    # the power required to move air or exhaust gas to all beds)
-    auxiliary_load_2_beds = _nonneg(
-        2
-        * units.convert(tsa.compressor.unit.work_mechanical[0], to_units=units.kW)
-        / tsa.number_beds,
-        units.kW,
-    )  # [kW]
-
-    # sorbent makeup accounts
-    fs.sorbent_makeup = UnitModelBlock()
-    fs.sorbent_makeup.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": sorbent_makeup_accounts,
-            "scaled_param": sorbent_makeup_rate,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # gas flow to dac accounts
-    fs.gas_flow_to_dac = UnitModelBlock()
-    fs.gas_flow_to_dac.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": gas_flow_to_dac_accounts,
-            "scaled_param": flow_mass_inlet,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # steam accounts
-    fs.steam = UnitModelBlock()
-    fs.steam.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": steam_accounts,
-            "scaled_param": units.convert(
-                tsa.flow_mass_steam, to_units=units.lb / units.hr
+    @unit.costing.Constraint()
+    def annual_labor_cost_rule_new(c):
+        return c.annual_operating_labor_cost == units.convert(
+            (
+                c.operators_per_shift_var
+                * c.labor_rate
+                * (1 + c.labor_burden / 100)
+                * 8760
+                * units.hr
             ),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # total plant auxiliary load accounts
-    fs.total_auxiliary_load = UnitModelBlock()
-    fs.total_auxiliary_load.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": total_auxiliary_load_accounts,
-            "scaled_param": total_auxiliary_load,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # get EPAT costing accounts for 15) DAC system
-    accounts_info = {}
-    for k, v in costing_params["8"]["B"].items():
-        if k in dac_system_accounts:
-            accounts_info[k] = v["Account Name"].replace("DAC ", "")
-    accounts = list(accounts_info.keys())
-
-    # 15.1 - DAC adsorption/desorption vessels (cost of 120 vessels)
-    vessels_account = [accounts[0]]
-    fs.vessels = UnitModelBlock()
-    fs.vessels.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": vessels_account,
-            "scaled_param": units.convert(tsa.bed_volume, to_units=units.ft**3),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.2 - DAC CO2 Compression & Drying
-    product_compression_account = [accounts[1]]
-    fs.product_compression = UnitModelBlock()
-    fs.product_compression.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": product_compression_account,
-            "scaled_param": product_compressor_auxiliary_load,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.3 - DAC CO2 Compressor Aftercooler
-    compressor_aftercooler_account = [accounts[2]]
-    fs.compressor_aftercooler = UnitModelBlock()
-    fs.compressor_aftercooler.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": compressor_aftercooler_account,
-            "scaled_param": compressor_aftercooler_heat_duty,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.4 - DAC System Air Handling Duct and Dampers
-    duct_dampers_account = [accounts[3]]
-    fs.duct_dampers = UnitModelBlock()
-    fs.duct_dampers.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": duct_dampers_account,
-            "scaled_param": 2
-            * units.convert(tsa.flow_mass_in_total_bed, to_units=units.lb / units.hr),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.5 - DAC System Air Handling Fans
-    feed_fans_account = [accounts[4]]
-    fs.feed_fans = UnitModelBlock()
-    fs.feed_fans.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": feed_fans_account,
-            "scaled_param": auxiliary_load_2_beds,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.6 - DAC Desorption Process Gas Handling System
-    desorption_gas_handling_account = [accounts[5]]
-    fs.desorption_gas_handling = UnitModelBlock()
-    fs.desorption_gas_handling.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": desorption_gas_handling_account,
-            "scaled_param": CO2_product_mass_flow,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.7 - DAC Steam Distribution System
-    steam_distribution_account = [accounts[6]]
-    fs.steam_distribution = UnitModelBlock()
-    fs.steam_distribution.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": steam_distribution_account,
-            "scaled_param": units.convert(
-                tsa.flow_mass_steam, to_units=units.lb / units.hr
-            ),
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # 15.8 - DAC System Controls Equipment
-    controls_equipment_account = [accounts[7]]
-    fs.controls_equipment = UnitModelBlock()
-    fs.controls_equipment.costing = UnitModelCostingBlock(
-        flowsheet_costing_block=fs.costing,
-        costing_method=QGESSCostingData.get_PP_costing,
-        costing_method_arguments={
-            "cost_accounts": controls_equipment_account,
-            "scaled_param": total_auxiliary_load,
-            "tech": 8,
-            "ccs": "B",
-            "additional_costing_params": costing_params,
-        },
-    )
-
-    # total plant cost
-    TPC_list = {}
-    for o in fs.component_objects(descend_into=True):
-        # look for costing blocks
-        if hasattr(o, "costing") and hasattr(o.costing, "total_plant_cost"):
-            for k in o.costing.total_plant_cost.keys():
-                if k not in ["15.1", "15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k]
-                if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * tsa.number_beds
-                if k in ["15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * tsa.number_beds / 2
-
-    # Total plant cost of dac unit
-    @fs.costing.Expression(doc="total TPC for TSA system in $MM")
-    def total_TPC(b):
-        return sum(TPC_list.values())
-
-    # build variable costs components
-
-    # gallon/day of water required
-    water_rate = (
-        units.convert(tsa.flow_mol_in_total, to_units=units.kmol / units.hr)
-        * units.hr
-        / units.kmol
-        * 60792.407
-        / 1629629
-        * units.gallon
-        / units.day
-    )
-    # ton/day of water_chems required
-    water_chems_rate = (
-        units.convert(tsa.flow_mol_in_total, to_units=units.kmol / units.hr)
-        * units.hr
-        / units.kmol
-        * 0.1811
-        / 1629629
-        * units.ton
-        / units.day
-    )
-    # ft^3/day of sorbent required
-    sorbent_rate = (
-        units.convert(tsa.bed_volume, to_units=units.ft**3)
-        * (1 - tsa.bed_voidage)
-        * tsa.number_beds
-        / 0.5
-        / 365
-        / units.day
-    )
-    # kW/day of aux_power required
-    aux_power_rate = total_auxiliary_load * 24 / units.day
-
-    # kg/day of steam required
-    steam_rate = units.convert(tsa.flow_mass_steam, to_units=units.kg / units.day)
-
-    # variables for rates
-    fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
-    fs.costing.water = Var(fs.time, initialize=1.0, units=units.gallon / units.day)
-    fs.costing.water_chems = Var(fs.time, initialize=1.0, units=units.ton / units.day)
-    fs.costing.sorbent = Var(fs.time, initialize=1.0, units=units.ft**3 / units.day)
-    fs.costing.aux_power = Var(fs.time, initialize=1.0, units=units.kW / units.day)
-    fs.costing.steam = Var(fs.time, initialize=1.0, units=units.kg / units.day)
-
-    # constraints for rates
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of water")
-    def water_eq(b, t):
-        return b.water[t] == water_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of water_chems")
-    def water_chems_eq(b, t):
-        return b.water_chems[t] == water_chems_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of sorbent")
-    def sorbent_eq(b, t):
-        return b.sorbent[t] == sorbent_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of aux_power")
-    def aux_power_eq(b, t):
-        return b.aux_power[t] == aux_power_rate
-
-    @fs.costing.Constraint(fs.time, doc="Equation for cost of steam")
-    def steam_eq(b, t):
-        return b.steam[t] == steam_rate
-
-    fs.costing.steam_eq.deactivate()
-    fs.costing.steam.fix(0.0)
-
-    fs.costing.aux_power_eq.deactivate()
-    fs.costing.aux_power.fix(0.0)
-
-    fs.costing.net_power.fix()
-
-    # resources to be costed
-    resources = [
-        "water",
-        "water_treatment_chemicals",
-        "sorbent",
-        "aux_power",
-        "waste_sorbent",
-        "IP_steam",
-    ]
-
-    # vars for resource consumption rates
-    rates = [
-        fs.costing.water,
-        fs.costing.water_chems,
-        fs.costing.sorbent,
-        fs.costing.aux_power,
-        fs.costing.sorbent,
-        fs.costing.steam,
-    ]
-
-    # resource prices
-    prices = {
-        "sorbent": 201 * units.USD_2018 / units.ft**3,
-        "aux_power": 0.06 * units.USD_2018 / units.kW,
-        "waste_sorbent": 0.86 * units.USD_2018 / units.ft**3,
-        "IP_steam": 0.00733 * units.USD_2018 / units.kg,
-    }
-
-    # land cost for total overnight cost
-    @fs.costing.Expression(doc="Land Cost [$MM]")
-    def land_cost_exp(b):
-        return (156000 * (tsa.number_beds / 120) ** (0.78)) * 1e-6  # scaled to Millions
-
-    # build fixed and variables O&M cost
-    fs.costing.build_process_costs(
-        net_power=fs.costing.net_power,
-        # arguments related to fixed OM costs
-        total_plant_cost=True,
-        labor_rate=38.50,
-        labor_burden=30,
-        operators_per_shift=8,
-        tech=6,
-        fixed_OM=True,
-        # arguments related owners costs
-        variable_OM=True,
-        land_cost=fs.costing.land_cost_exp,
-        resources=resources,
-        rates=rates,
-        prices=prices,
-        fuel=None,
-        tonne_CO2_capture=tsa.total_CO2_captured_year,
-    )
-
-
-def print_dac_costing(tsa):
-    fs = tsa.flowsheet()
-
-    TPC_list = {}
-    for o in fs.component_objects(descend_into=True):
-        # look for costing blocks
-        if hasattr(o, "costing") and hasattr(o.costing, "total_plant_cost"):
-            for k in o.costing.total_plant_cost.keys():
-                if k not in ["15.1", "15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k]
-                if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * tsa.number_beds
-                if k in ["15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * tsa.number_beds / 2
-
-    for i, k in TPC_list.items():
-        print(i, value(k))
-
-
-def _var_dict_costing(tsa):
-
-    # get flowsheet
-    fs = tsa.flowsheet()
-
-    # create dir with costing summary
-    var_dict = {}
-
-    var_dict["Annualized capital cost of dac unit [$MM/year]"] = value(
-        fs.costing.annualized_cost
-    )
-    var_dict["Fixed O&M cost of dac unit [$MM/year]"] = value(
-        fs.costing.total_fixed_OM_cost
-    )
-    var_dict["Variable O&M cost of dac unit [$MM/year]"] = value(
-        fs.costing.total_variable_OM_cost[0]
-    )
-    var_dict["Total annualized cost of dac unit [$MM/year]"] = value(
-        fs.costing.annualized_cost
-        + fs.costing.total_fixed_OM_cost
-        + fs.costing.total_variable_OM_cost[0] * fs.costing.capacity_factor
-    )
-    var_dict["Capture cost [$/tonne CO2]"] = value(fs.costing.cost_of_capture * 1e6)
-
-    if hasattr(fs, "emissions_electric_boiler"):
-        var_dict["Electric Boiler Emissions [mol/s]"] = value(
-            fs.emissions_electric_boiler
+            CE_index_units,
         )
 
-    if hasattr(fs, "emissions_electric_boiler_pv"):
-        var_dict["Electric Boiler Emissions, PV electricity grid [mol/s]"] = value(
-            fs.emissions_electric_boiler_pv
-        )
+    # # brick replacement variable cost
+    # unit.costing.other_variable_costs.unfix()
 
-    return var_dict
+    # @unit.costing.Constraint()
+    # def other_var_costs_eqn(b):
+    #     return (
+    #         b.other_variable_costs[0]
+    #         == unit.number_of_units
+    #         * dll_per_brick
+    #         * unit.number_of_panels[0]
+    #         * unit.bricks_per_panel
+    #         * 1e-6
+    #         / replacement_time
+    #     )
+
+    unit.costing.costing_initialization()
 
 
-def dac_costing_summary(tsa, export=False):
+"""
+Centralized Systems
+- Water withdrawal and pretreating
+- Boiler feedwater system
+- Cooling tower and cooling water circulation
+- Waste water treatment
+- Electric equipment (Switchyard, transformers, ..)
+- Instrumentation and control equipment
+- Site preparation and facilities
+- Buildings
+- Electric boiler
+- CO2 compressor/vacuum pump
 
-    fs = tsa.flowsheet()
+Distributed Systems
+- DAC units (costed per brick)
+- Air ducts
+- Fans
+- Desorption gas handling
+- Steam distribution
+- DAC specific controls
 
-    if not hasattr(fs, "vessels"):
-        raise ConfigurationError(f"{tsa.name} does not have any costing block.")
-
-    var_dict = _var_dict_costing(tsa)
-
-    summary_dir = {}
-    summary_dir["Value"] = {}
-    summary_dir["pos"] = {}
-
-    count = 1
-    for k, v in var_dict.items():
-        summary_dir["Value"][k] = value(v)
-        summary_dir["pos"][k] = count
-        count += 1
-
-    df = DataFrame.from_dict(summary_dir, orient="columns")
-    del df["pos"]
-    if export:
-        df.to_csv(f"{tsa.local_name}_summary_costing.csv")
-
-    print("\n" + "=" * 84)
-    print(f"summary costing {tsa.local_name}")
-    print("-" * 84)
-    stdout.write(textwrap.indent(stream_table_dataframe_to_string(df), " " * 4))
-    print("\n" + "=" * 84 + "\n")
+The distributed systems need to be multiplied by the number of units when added
+to the total plant cost.
+"""
