@@ -88,7 +88,7 @@ vacuum_pump_params = {
 def get_dac_costing_data(case):
     if case == "electric_boiler":
         fname = "costing_params_dac_electric_boiler.json"
-    elif case == "retrofit_NGCC":
+    elif case == "retrofit_ngcc":
         fname = "costing_params_dac_retrofit_ngcc.json"
     else:
         print("Invalid case")
