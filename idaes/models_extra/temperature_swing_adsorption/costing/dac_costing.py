@@ -11,7 +11,11 @@
 # for full copyright and license information.
 #################################################################################
 """ """
+import os
 import json
+import textwrap
+from sys import stdout
+from pandas import DataFrame
 
 # import pytest
 import pandas as pd
@@ -26,13 +30,16 @@ from pyomo.environ import (
     Var,
     Expression,
 )
+from pyomo.common.fileutils import this_file_dir
 from pyomo.util.check_units import assert_units_consistent
 from pyomo.common.config import ConfigValue
 
 from idaes.core import FlowsheetBlock, UnitModelBlock, UnitModelCostingBlock
+from idaes.core.util.exceptions import ConfigurationError
 from idaes.core.solvers import get_solver
 from idaes.core.util.model_statistics import degrees_of_freedom
-
+import idaes.logger as idaeslog
+from idaes.core.util.tables import stream_table_dataframe_to_string
 
 from idaes.models.properties import iapws95
 
@@ -42,6 +49,9 @@ from idaes.models_extra.power_generation.costing.power_plant_capcost import (
     QGESSCostingData,
 )
 import pyomo.environ as pyo
+
+directory = this_file_dir()
+_log = idaeslog.getLogger(__name__)
 
 vacuum_pump_params = {
     "9": {
@@ -77,21 +87,22 @@ vacuum_pump_params = {
 
 def get_dac_costing_data(case):
     if case == "electric_boiler":
-        fname = "dac_eb_costing_data.json"
+        fname = "costing_params_dac_electric_boiler.json"
     elif case == "retrofit_NGCC":
-        fname = "dac_retrofit_costing_data.json"
+        fname = "costing_params_dac_retrofit_ngcc.json"
     else:
         print("Invalid case")
 
-    with open(fname, "r") as f:
-        costing_data = json.load(f)
+    # load custom costing parameters
+    with open(os.path.join(directory, fname), "r") as f:
+        costing_params = json.load(f)
 
-    return costing_data
+    return costing_params
 
 
 def get_dac_costing(unit, costing_case):
     # capital costs
-    dac_cost_params = get_dac_costing_data(costing_case)
+    costing_params = get_dac_costing_data(costing_case)
 
     unit.costing = QGESSCosting()
     CE_index_year = "2018"
@@ -111,7 +122,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.raw_water_withdrawal[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -124,7 +135,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.steam_flow_mass[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -137,7 +148,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.cooling_tower_duty[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -150,7 +161,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.process_water_discharge[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -164,7 +175,7 @@ def get_dac_costing(unit, costing_case):
                 * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -201,7 +212,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.auxiliary_load[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -215,7 +226,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.steam_flow_mass[0],
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -229,7 +240,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.steam_flow_mass[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -242,7 +253,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.auxiliary_load[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -255,7 +266,7 @@ def get_dac_costing(unit, costing_case):
             "scaled_param": units.convert(unit.bed_volume, to_units=units.ft**3),
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -271,7 +282,7 @@ def get_dac_costing(unit, costing_case):
                 "scaled_param": unit.compressor_power[0] * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
-                "additional_costing_params": dac_cost_params,
+                "additional_costing_params": costing_params,
             },
         )
 
@@ -313,7 +324,7 @@ def get_dac_costing(unit, costing_case):
             * unit.number_of_units,
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -327,7 +338,7 @@ def get_dac_costing(unit, costing_case):
             "scaled_param": (unit.air_flow_mass[0] / unit.num_beds_total * 2),
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -341,7 +352,7 @@ def get_dac_costing(unit, costing_case):
             "scaled_param": unit.fans.work_mechanical[0] / unit.num_beds_total * 2,
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -355,7 +366,7 @@ def get_dac_costing(unit, costing_case):
             "scaled_param": unit.co2_flow_mass[0],
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -369,7 +380,7 @@ def get_dac_costing(unit, costing_case):
             "scaled_param": unit.steam_flow_mass[0],
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -383,7 +394,7 @@ def get_dac_costing(unit, costing_case):
             "scaled_param": unit.auxiliary_load[0],
             "tech": 8,
             "ccs": "B",
-            "additional_costing_params": dac_cost_params,
+            "additional_costing_params": costing_params,
         },
     )
 
@@ -397,7 +408,7 @@ def get_dac_costing(unit, costing_case):
     #         "scaled_param": unit.steam_flow_mass[0],
     #         "tech": 8,
     #         "ccs": "B",
-    #         "additional_costing_params": dac_cost_params,
+    #         "additional_costing_params": costing_params,
     #     },
     # )
 
@@ -626,3 +637,90 @@ Distributed Systems
 The distributed systems need to be multiplied by the number of units when added
 to the total plant cost.
 """
+
+
+def print_dac_costing(tsa):
+    fs = tsa.flowsheet()
+
+    TPC_list = {}
+    for o in fs.component_objects(descend_into=True):
+        # look for costing blocks
+        if hasattr(o, "costing") and hasattr(o.costing, "total_plant_cost"):
+            for k in o.costing.total_plant_cost.keys():
+                if k not in ["15.1", "15.4", "15.5"]:
+                    TPC_list[k] = o.costing.total_plant_cost[k]
+                if k in ["15.1"]:
+                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * tsa.number_beds
+                if k in ["15.4", "15.5"]:
+                    TPC_list[k] = o.costing.total_plant_cost[k] * tsa.number_beds / 2
+
+    for i, k in TPC_list.items():
+        print(i, value(k))
+
+
+def _var_dict_costing(tsa):
+
+    # get flowsheet
+    fs = tsa.flowsheet()
+
+    # create dir with costing summary
+    var_dict = {}
+
+    var_dict["Annualized capital cost of dac unit [$MM/year]"] = value(
+        fs.costing.annualized_cost
+    )
+    var_dict["Fixed O&M cost of dac unit [$MM/year]"] = value(
+        fs.costing.total_fixed_OM_cost
+    )
+    var_dict["Variable O&M cost of dac unit [$MM/year]"] = value(
+        fs.costing.total_variable_OM_cost[0]
+    )
+    var_dict["Total annualized cost of dac unit [$MM/year]"] = value(
+        fs.costing.annualized_cost
+        + fs.costing.total_fixed_OM_cost
+        + fs.costing.total_variable_OM_cost[0] * fs.costing.capacity_factor
+    )
+    var_dict["Capture cost [$/tonne CO2]"] = value(fs.costing.cost_of_capture * 1e6)
+
+    if hasattr(fs, "emissions_electric_boiler"):
+        var_dict["Electric Boiler Emissions [mol/s]"] = value(
+            fs.emissions_electric_boiler
+        )
+
+    if hasattr(fs, "emissions_electric_boiler_pv"):
+        var_dict["Electric Boiler Emissions, PV electricity grid [mol/s]"] = value(
+            fs.emissions_electric_boiler_pv
+        )
+
+    return var_dict
+
+
+def dac_costing_summary(tsa, export=False):
+
+    fs = tsa.flowsheet()
+
+    if not hasattr(fs, "vessels"):
+        raise ConfigurationError(f"{tsa.name} does not have any costing block.")
+
+    var_dict = _var_dict_costing(tsa)
+
+    summary_dir = {}
+    summary_dir["Value"] = {}
+    summary_dir["pos"] = {}
+
+    count = 1
+    for k, v in var_dict.items():
+        summary_dir["Value"][k] = value(v)
+        summary_dir["pos"][k] = count
+        count += 1
+
+    df = DataFrame.from_dict(summary_dir, orient="columns")
+    del df["pos"]
+    if export:
+        df.to_csv(f"{tsa.local_name}_summary_costing.csv")
+
+    print("\n" + "=" * 84)
+    print(f"summary costing {tsa.local_name}")
+    print("-" * 84)
+    stdout.write(textwrap.indent(stream_table_dataframe_to_string(df), " " * 4))
+    print("\n" + "=" * 84 + "\n")
