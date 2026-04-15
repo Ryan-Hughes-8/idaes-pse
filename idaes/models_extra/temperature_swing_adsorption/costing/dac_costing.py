@@ -40,6 +40,7 @@ from idaes.core.solvers import get_solver
 from idaes.core.util.model_statistics import degrees_of_freedom
 import idaes.logger as idaeslog
 from idaes.core.util.tables import stream_table_dataframe_to_string
+from idaes.core.util.math import smooth_max
 
 from idaes.models.properties import iapws95
 
@@ -100,6 +101,26 @@ def get_dac_costing_data(case):
     return costing_params
 
 
+def _nonneg(expr, unit):
+    """
+    Return a smooth nonnegative version of expr with the given units.
+    """
+    return smooth_max(0, units.convert(expr, to_units=unit) / unit) * unit
+
+
+def _warn_if_negative(expr, name):
+    try:
+        v = value(expr)
+    except Exception:
+        return
+    if v < 0:
+        _log.warning(
+            "%s is negative (%.6g). Clamping to zero for costing stability.",
+            name,
+            v,
+        )
+
+
 def get_dac_costing(unit, costing_case):
     # capital costs
     costing_params = get_dac_costing_data(costing_case)
@@ -108,9 +129,95 @@ def get_dac_costing(unit, costing_case):
     CE_index_year = "2018"
     CE_index_units = getattr(units, "MUSD_" + CE_index_year)
 
+    # get flowsheet
+    fs = unit.flowsheet()
+
     # add a var to account for multiple DAC units
     unit.number_of_units = Var(initialize=1, bounds=(0, 100))
     unit.number_of_units.fix(1)
+
+    # reference parameters for accounts
+    if costing_case == "electric_boiler":
+        # CO2 product mass flow rate - from model
+        CO2_product_mass_flow = units.convert(
+            unit.mw["CO2"] * unit.flow_mol_co2_rich_stream[0, "CO2"],
+            to_units=units.lb / units.hr,
+        )  # [lb/hr]
+        # raw water withdrawal flow rate - from surrogates
+        # TODO: check which expression is correct (CDR has this as the correlation for ngcc)
+        raw_water_withdrawal = (
+            (1.0496e-03 * CO2_product_mass_flow * units.hr / units.lb + 5.3359e01)
+            * units.gal
+            / units.min
+        )  # [gpm]
+        # process water discharge flow rate - from surrogates
+        # TODO: check which expression is correct (CDR has this as the correlation for ngcc)
+        process_water_discharge = (
+            (5.4007e-04 * CO2_product_mass_flow * units.hr / units.lb + 1.2000e01)
+            * units.gal
+            / units.min
+        )  # [gpm]
+        # cooling tower heat duty - from surrogates
+        # TODO: check which expression is correct (CDR has this as the correlation for ngcc)
+        cooling_tower_duty = (
+            (3.0797e-04 * CO2_product_mass_flow * units.hr / units.lb + 2.5000e01)
+            * units.MBtu
+            / units.hr
+        )  # [MMBtu/hr]
+        # circulating water flow_rate - from surrogates
+        # TODO: replace with 100*cooling_tower_duty*units_adjustment
+        circulating_water_flow_rate = (
+            (3.0797e-02 * CO2_product_mass_flow * units.hr / units.lb + 2.5000e03)
+            * units.gal
+            / units.min
+        )  # [gpm]
+        # mole flow rate of dac feed - from model (exhaust or air)
+        flow_mol_inlet = units.convert(
+            unit.flow_mol_in_total, to_units=units.kmol / units.hr
+        )  # [kmol/hr]
+        # compressor auxiliary load - from surrogates
+        # TODO: this compressor power is just from surrogates, for vacuum support, need to model with compressor unit model
+        _pcal_dimless = 0.0012 * flow_mol_inlet * units.hr / units.kmol - 2.2798
+        _warn_if_negative(_pcal_dimless, "product_compressor_auxiliary_load surrogate")
+        product_compressor_auxiliary_load = (
+            smooth_max(0, _pcal_dimless) * units.kW
+        )  # [kW]
+        # boiler auxiliary load - from surrogates
+        boiler_auxiliary_load = _nonneg(
+            0.000335999
+            * units.convert(unit.flow_mass_steam, to_units=units.lb / units.hr)
+            * units.hr
+            / units.lb
+            * 1e3
+            * units.kW,
+            units.kW,
+        )  # convert MW to kW
+        # total auxiliary load
+        # calculate with fans work + compressor for CO2 pure + boiler aux load
+        total_auxiliary_load = _nonneg(
+            product_compressor_auxiliary_load
+            + boiler_auxiliary_load
+            + units.convert(unit.compressor.unit.work_mechanical[0], to_units=units.kW),
+            units.kW,
+        )
+        # compressor aftercooler heat exchanger duty - from surrogates
+        _cahd_dimless = 2e-6 * flow_mol_inlet * units.hr / units.kmol - 7e-8
+        _warn_if_negative(_cahd_dimless, "compressor_aftercooler_heat_duty surrogate")
+        compressor_aftercooler_heat_duty = (
+            smooth_max(0, _cahd_dimless) * units.MBtu / units.hr
+        )  # [MMBtu/hr]
+        # auxiliary load for 2 beds (pressure changer from TSA model estimates
+        # the power required to move air or exhaust gas to all beds)
+        auxiliary_load_2_beds = _nonneg(
+            2
+            * units.convert(unit.compressor.unit.work_mechanical[0], to_units=units.kW)
+            / unit.number_beds,
+            units.kW,
+        )  # [kW]
+    elif costing_case == "retrofit_ngcc":
+        pass
+    else:
+        print("Invalid Case")
 
     if costing_case == "electric_boiler":
         unit.raw_water_system = UnitModelBlock()
@@ -119,7 +226,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["3.2", "3.4", "9.5", "14.6"],
-                "scaled_param": unit.raw_water_withdrawal[0] * unit.number_of_units,
+                "scaled_param": raw_water_withdrawal * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -132,7 +239,10 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["3.1", "3.3", "3.5"],
-                "scaled_param": unit.steam_flow_mass[0] * unit.number_of_units,
+                "scaled_param": units.convert(
+                    unit.flow_mass_steam, to_units=units.lb / units.hr
+                )
+                * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -145,7 +255,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["9.1"],
-                "scaled_param": unit.cooling_tower_duty[0] * unit.number_of_units,
+                "scaled_param": cooling_tower_duty * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -158,7 +268,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["3.7"],
-                "scaled_param": unit.process_water_discharge[0] * unit.number_of_units,
+                "scaled_param": process_water_discharge * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -171,8 +281,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["9.2", "9.3", "9.4", "9.6", "9.7", "14.5"],
-                "scaled_param": unit.circulating_water_flowrate[0]
-                * unit.number_of_units,
+                "scaled_param": circulating_water_flow_rate * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -209,7 +318,7 @@ def get_dac_costing(unit, costing_case):
                     "14.9",
                     "14.10",
                 ],
-                "scaled_param": unit.auxiliary_load[0] * unit.number_of_units,
+                "scaled_param": total_auxiliary_load * unit.number_of_units,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -223,7 +332,9 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["15.9"],
-                "scaled_param": unit.steam_flow_mass[0],
+                "scaled_param": units.convert(
+                    unit.flow_mass_steam, to_units=units.lb / units.hr
+                ),
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -270,48 +381,48 @@ def get_dac_costing(unit, costing_case):
         },
     )
 
-    purge_pressure = unit.config.purge_pressure
+    # purge_pressure = unit.config.purge_pressure
     # 15.2 - DAC CO2 Compression & Drying
     unit.product_compression = UnitModelBlock()
-    if purge_pressure == 1:
-        unit.product_compression.costing = UnitModelCostingBlock(
-            flowsheet_costing_block=unit.costing,
-            costing_method=QGESSCostingData.get_PP_costing,
-            costing_method_arguments={
-                "cost_accounts": ["15.2"],
-                "scaled_param": unit.compressor_power[0] * unit.number_of_units,
-                "tech": 8,
-                "ccs": "B",
-                "additional_costing_params": costing_params,
-            },
-        )
+    # if purge_pressure == 1:
+    unit.product_compression.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=unit.costing,
+        costing_method=QGESSCostingData.get_PP_costing,
+        costing_method_arguments={
+            "cost_accounts": ["15.2"],
+            "scaled_param": product_compressor_auxiliary_load * unit.number_of_units,
+            "tech": 8,
+            "ccs": "B",
+            "additional_costing_params": costing_params,
+        },
+    )
 
-    elif purge_pressure == 0.2:
-        unit.product_compression.costing = UnitModelCostingBlock(
-            flowsheet_costing_block=unit.costing,
-            costing_method=QGESSCostingData.get_PP_costing,
-            costing_method_arguments={
-                "cost_accounts": ["vac_2.9_eq1"],
-                "scaled_param": unit.compressor_power[0] * unit.number_of_units,
-                "tech": 9,
-                "ccs": "B",
-                "additional_costing_params": vacuum_pump_params,
-            },
-        )
+    # elif purge_pressure == 0.2:
+    #     unit.product_compression.costing = UnitModelCostingBlock(
+    #         flowsheet_costing_block=unit.costing,
+    #         costing_method=QGESSCostingData.get_PP_costing,
+    #         costing_method_arguments={
+    #             "cost_accounts": ["vac_2.9_eq1"],
+    #             "scaled_param": unit.compressor_power[0] * unit.number_of_units,
+    #             "tech": 9,
+    #             "ccs": "B",
+    #             "additional_costing_params": vacuum_pump_params,
+    #         },
+    #     )
 
-    elif purge_pressure == 0.5:
-        unit.product_compression.costing = UnitModelCostingBlock(
-            flowsheet_costing_block=unit.costing,
-            costing_method=QGESSCostingData.get_PP_costing,
-            costing_method_arguments={
-                "cost_accounts": ["vac_6.5_eq1"],
-                "scaled_param": unit.compressor_power[0] * unit.number_of_units,
-                "units": "MW",
-                "tech": 9,
-                "ccs": "B",
-                "additional_costing_params": vacuum_pump_params,
-            },
-        )
+    # elif purge_pressure == 0.5:
+    #     unit.product_compression.costing = UnitModelCostingBlock(
+    #         flowsheet_costing_block=unit.costing,
+    #         costing_method=QGESSCostingData.get_PP_costing,
+    #         costing_method_arguments={
+    #             "cost_accounts": ["vac_6.5_eq1"],
+    #             "scaled_param": unit.compressor_power[0] * unit.number_of_units,
+    #             "units": "MW",
+    #             "tech": 9,
+    #             "ccs": "B",
+    #             "additional_costing_params": vacuum_pump_params,
+    #         },
+    #     )
 
     # 15.3 - DAC CO2 Compressor Aftercooler
     unit.compressor_aftercooler = UnitModelBlock()
@@ -320,8 +431,7 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.3"],
-            "scaled_param": unit.compressor_aftercooler_heat_duty[0]
-            * unit.number_of_units,
+            "scaled_param": compressor_aftercooler_heat_duty * unit.number_of_units,
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -329,13 +439,15 @@ def get_dac_costing(unit, costing_case):
     )
 
     # 15.4 - DAC System Air Handling Duct and Dampers (1 system per 2 beds)
+    # TODO: double check the 1 unit per two beds assumption here
     unit.duct_dampers = UnitModelBlock()
     unit.duct_dampers.costing = UnitModelCostingBlock(
         flowsheet_costing_block=unit.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.4"],
-            "scaled_param": (unit.air_flow_mass[0] / unit.num_beds_total * 2),
+            "scaled_param": 2
+            * units.convert(unit.flow_mass_in_total_bed, to_units=units.lb / units.hr),
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -349,7 +461,7 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.5"],
-            "scaled_param": unit.fans.work_mechanical[0] / unit.num_beds_total * 2,
+            "scaled_param": auxiliary_load_2_beds,
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -363,7 +475,7 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.6"],
-            "scaled_param": unit.co2_flow_mass[0],
+            "scaled_param": CO2_product_mass_flow,
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -377,7 +489,9 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.7"],
-            "scaled_param": unit.steam_flow_mass[0],
+            "scaled_param": units.convert(
+                unit.flow_mass_steam, to_units=units.lb / units.hr
+            ),
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -391,7 +505,7 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.8"],
-            "scaled_param": unit.auxiliary_load[0],
+            "scaled_param": total_auxiliary_load,
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -440,15 +554,11 @@ def get_dac_costing(unit, costing_case):
             b.total_TPC
             == sum(centralized_TPCs)
             + (
-                unit.vessels.costing.total_plant_cost["15.1"]
-                / 120
-                * unit.num_beds_total
+                unit.vessels.costing.total_plant_cost["15.1"] / 120 * unit.number_beds
                 + unit.duct_dampers.costing.total_plant_cost["15.4"]
-                * unit.num_beds_total
+                * unit.number_beds
                 / 2
-                + unit.feed_fans.costing.total_plant_cost["15.5"]
-                * unit.num_beds_total
-                / 2
+                + unit.feed_fans.costing.total_plant_cost["15.5"] * unit.number_beds / 2
                 + unit.desorption_gas_handling.costing.total_plant_cost["15.6"]
                 + unit.controls_equipment.costing.total_plant_cost["15.8"]
             )
@@ -462,56 +572,62 @@ def get_dac_costing(unit, costing_case):
         "aux_power",
         "sorbent",
         "waste_sorbent",
-        "boiler_feed_water",
+        # "boiler_feed_water", #TODO: add this back in
     ]
     if costing_case == "retrofit_NGCC":
         resources.append("IP_steam")
 
     # resource consumption rates for variable costing
     capacity_factor = 0.85
+    sorbent_lifespan = 0.5
 
-    @unit.costing.Expression(unit.time)
+    @unit.costing.Expression(fs.time)
     def water_use(b, t):
         # water use is lineraly scaled from NETL reference
         ref_water = 60792.407 * units.gal / units.day
         ref_air = 1629629 * units.kmol / units.hr
-        return unit.air_flow_mol[t] * (ref_water / ref_air) * unit.number_of_units
+        return (
+            units.convert(unit.flow_mol_in_total, to_units=units.kmol / units.hr)
+            * (ref_water / ref_air)
+            * unit.number_of_units
+        )
 
-    @unit.costing.Expression(unit.time)
+    @unit.costing.Expression(fs.time)
     def water_treatment_chems(b, t):
         # treatment chemical use is lineraly scaled from NETL reference
         ref_chem = 0.1811 * units.ton / units.day
         ref_air = 1629629 * units.kmol / units.hr
-        return unit.air_flow_mol[t] * (ref_chem / ref_air) * unit.number_of_units
+        return (
+            units.convert(unit.flow_mol_in_total, to_units=units.kmol / units.hr)
+            * (ref_chem / ref_air)
+            * unit.number_of_units
+        )
 
-    @unit.costing.Expression(unit.time)
+    @unit.costing.Expression(fs.time)
     def energy_purchased(b, t):  # in kWh/day
         hr_per_day = 24 * units.hr / units.day
-        return unit.auxiliary_load[t] * hr_per_day * unit.number_of_units
+        return total_auxiliary_load * hr_per_day * unit.number_of_units
 
-    @unit.costing.Expression(unit.time)
+    @unit.costing.Expression(fs.time)
     def sorbent_rate(b, t):
         return (
             units.convert(unit.bed_volume, to_units=units.ft**3)
             * (1 - unit.bed_voidage)
-            * unit.num_beds_total
-            / unit.config.sorbent_lifespan
+            * unit.number_beds
+            / sorbent_lifespan
             / 365
             / units.day
         )
 
-    @unit.costing.Expression(unit.time)
-    def bfw_rate(b, t):
-        hr_per_day = 24 * units.hr / units.day
-        return unit.BFW_makeup[t] * hr_per_day
+    # TODO: add this back in
+    # @unit.costing.Expression(fs.time)
+    # def bfw_rate(b, t):
+    #     hr_per_day = 24 * units.hr / units.day
+    #     return unit.BFW_makeup[t] * hr_per_day
 
-    @unit.costing.Expression(unit.time)
+    @unit.costing.Expression(fs.time)
     def steam_rate(b, t):
-        hr_per_day = 24 * units.hr / units.day
-        return (
-            units.convert(unit.steam_flow_mass[t], to_units=units.kg / units.hr)
-            * hr_per_day
-        )
+        return units.convert(unit.flow_mass_steam, to_units=units.kg / units.day)
 
     # vars for resource consumption rates
     rates = [
@@ -520,7 +636,7 @@ def get_dac_costing(unit, costing_case):
         unit.costing.energy_purchased,
         unit.costing.sorbent_rate,
         unit.costing.sorbent_rate,
-        unit.costing.bfw_rate,
+        # unit.costing.bfw_rate, #TODO: add this back in
     ]
     if costing_case == "retrofit_NGCC":
         rates.append(unit.costing.steam_rate)
@@ -540,16 +656,15 @@ def get_dac_costing(unit, costing_case):
     @unit.costing.Expression()
     def land_cost1(b):
         return (
-            156000 * (unit.num_beds_total / 120) ** (0.78)
+            156000 * (unit.number_beds / 120) ** (0.78)
         ) * 1e-6  # scaled to Millions
 
-    @unit.costing.Expression()
-    def tonne_CO2_capture(b):
-        # return unit.co2_flow_mass[0] / 2204.62 * 8760 * unit.number_of_units
-        return (
-            units.convert(unit.co2_flow_mass[0], to_units=units.tonne / units.year)
-            * unit.number_of_units
-        )
+    # @unit.costing.Expression()
+    # def tonne_CO2_capture(b):
+    #     return (
+    #         units.convert(unit.co2_flow_mass[0], to_units=units.tonne / units.year)
+    #         * unit.number_of_units
+    #     )
 
     unit.costing.build_process_costs(
         net_power=None,
@@ -570,7 +685,7 @@ def get_dac_costing(unit, costing_case):
         fuel=None,
         waste=None,
         chemicals=None,
-        tonne_CO2_capture=unit.costing.tonne_CO2_capture,
+        tonne_CO2_capture=unit.total_CO2_captured_year,
     )
 
     # we want the number of operators to depend on the number of units
