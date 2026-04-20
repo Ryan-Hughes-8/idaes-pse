@@ -54,36 +54,36 @@ import pyomo.environ as pyo
 directory = this_file_dir()
 _log = idaeslog.getLogger(__name__)
 
-vacuum_pump_params = {
-    "9": {
-        "B": {
-            "vac_2.9_eq1": {
-                "Account Name": "Vacuum pump quote for 2.9 psia",
-                "Exponent": 0.45,
-                "Process Parameter": "CO2 Flowrate",
-                "BEC": 47.8e6 / 1e3,  # 46e6/1e3,  # BEC in $1000 dollars
-                "BEC_units": "K$2018",
-                "Eng Fee": 0.2,
-                "Process Contingency": 0.18,
-                "Project Contingency": 0.2,
-                "RP Value": 77.00,
-                "Units": "MW",
-            },
-            "vac_6.5_eq1": {
-                "Account Name": "Vacuum pump quote for 6.5 psia",
-                "Exponent": 0.45,
-                "Process Parameter": "Absorber volume",
-                "BEC": 18.71e3,  # 18e6 / 1e3,
-                "BEC_units": "K$2018",
-                "Eng Fee": 0.2,
-                "Process Contingency": 0.18,
-                "Project Contingency": 0.2,
-                "RP Value": 63.00,
-                "Units": "MW",
-            },
-        }
-    }
-}
+# vacuum_pump_params = {
+#     "9": {
+#         "B": {
+#             "vac_2.9_eq1": {
+#                 "Account Name": "Vacuum pump quote for 2.9 psia",
+#                 "Exponent": 0.45,
+#                 "Process Parameter": "CO2 Flowrate",
+#                 "BEC": 47.8e6 / 1e3,  # 46e6/1e3,  # BEC in $1000 dollars
+#                 "BEC_units": "K$2018",
+#                 "Eng Fee": 0.2,
+#                 "Process Contingency": 0.18,
+#                 "Project Contingency": 0.2,
+#                 "RP Value": 77.00,
+#                 "Units": "MW",
+#             },
+#             "vac_6.5_eq1": {
+#                 "Account Name": "Vacuum pump quote for 6.5 psia",
+#                 "Exponent": 0.45,
+#                 "Process Parameter": "Absorber volume",
+#                 "BEC": 18.71e3,  # 18e6 / 1e3,
+#                 "BEC_units": "K$2018",
+#                 "Eng Fee": 0.2,
+#                 "Process Contingency": 0.18,
+#                 "Project Contingency": 0.2,
+#                 "RP Value": 63.00,
+#                 "Units": "MW",
+#             },
+#         }
+#     }
+# }
 
 
 def get_dac_costing_data(case):
@@ -92,7 +92,7 @@ def get_dac_costing_data(case):
     elif case == "retrofit_ngcc":
         fname = "costing_params_dac_retrofit_ngcc.json"
     else:
-        print("Invalid case")
+        raise ConfigurationError("costing case not defined.")
 
     # load custom costing parameters
     with open(os.path.join(directory, fname), "r") as f:
@@ -373,7 +373,44 @@ def get_dac_costing(unit, costing_case):
             },
         )
     else:
-        print("Invalid Case")
+        raise ConfigurationError("costing case not defined.")
+
+    # sorbent makeup accounts
+    sorbent_lifespan = 0.5
+
+    sorbent_makeup_rate = (
+        units.convert(unit.bed_volume, to_units=units.ft**3)
+        * (1 - unit.bed_voidage)
+        * unit.number_beds
+        / sorbent_lifespan
+        / 365
+        / units.day
+    )
+
+    fs.sorbent_makeup = UnitModelBlock()
+    fs.sorbent_makeup.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=fs.costing,
+        costing_method=QGESSCostingData.get_PP_costing,
+        costing_method_arguments={
+            "cost_accounts": [
+                "1.5",
+                "1.6",
+                "1.7",
+                "1.8",
+                "1.9",
+                "2.5",
+                "2.6",
+                "2.9",
+                "10.6",
+                "10.7",
+                "10.9",
+            ],
+            "scaled_param": sorbent_makeup_rate,
+            "tech": 8,
+            "ccs": "B",
+            "additional_costing_params": costing_params,
+        },
+    )
 
     fs.vessels = UnitModelBlock()
     fs.vessels.costing = UnitModelCostingBlock(
@@ -553,7 +590,10 @@ def get_dac_costing(unit, costing_case):
 
     # resource consumption rates for variable costing
     capacity_factor = 0.85
-    sorbent_lifespan = 0.5
+
+    @fs.costing.Expression(fs.time)
+    def sorbent_rate(b):
+        return sorbent_makeup_rate
 
     @fs.costing.Expression(fs.time)
     def water_use(b, t):
@@ -577,17 +617,6 @@ def get_dac_costing(unit, costing_case):
     def energy_purchased(b, t):  # in kWh/day
         hr_per_day = 24 * units.hr / units.day
         return total_auxiliary_load * hr_per_day
-
-    @fs.costing.Expression(fs.time)
-    def sorbent_rate(b, t):
-        return (
-            units.convert(unit.bed_volume, to_units=units.ft**3)
-            * (1 - unit.bed_voidage)
-            * unit.number_beds
-            / sorbent_lifespan
-            / 365
-            / units.day
-        )
 
     # TODO: add this back in
     # @fs.costing.Expression(fs.time)
