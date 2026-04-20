@@ -599,6 +599,9 @@ def get_dac_costing(unit, costing_case):
     def steam_rate(b, t):
         return units.convert(unit.flow_mass_steam, to_units=units.kg / units.day)
 
+    fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
+    fs.costing.net_power.fix()
+
     # resorces to be costed
     resources = [
         "water",
@@ -637,13 +640,14 @@ def get_dac_costing(unit, costing_case):
     }
 
     @fs.costing.Expression()
-    def land_cost1(b):
+    def land_cost_exp(b):
         return (
             156000 * (unit.number_beds / 120) ** (0.78)
         ) * 1e-6  # scaled to Millions
 
     fs.costing.build_process_costs(
-        net_power=None,
+        # net_power=None,
+        net_power=fs.costing.net_power,
         # arguments related to fixed OM costs
         total_plant_cost=True,
         labor_rate=38.50,
@@ -654,13 +658,13 @@ def get_dac_costing(unit, costing_case):
         # arguments related owners costs
         variable_OM=True,
         capacity_factor=capacity_factor,
-        land_cost=fs.costing.land_cost1,
+        land_cost=fs.costing.land_cost_exp,
         resources=resources,
         rates=rates,
         prices=prices,
         fuel=None,
-        waste=None,
-        chemicals=None,
+        # waste=None,
+        # chemicals=None,
         tonne_CO2_capture=unit.total_CO2_captured_year,
     )
 
