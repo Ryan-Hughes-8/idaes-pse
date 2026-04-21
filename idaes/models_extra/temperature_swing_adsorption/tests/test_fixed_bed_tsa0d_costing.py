@@ -11,10 +11,10 @@
 # for full copyright and license information.
 #################################################################################
 """
-Tests for the direct air capture costing model.
+Tests for the TSA 0D costing model.
 """
 
-__author__ = "Alex Noring"
+__author__ = "Alex Noring, Ryan Hughes"
 
 import pytest
 
@@ -104,8 +104,8 @@ class TestElectricBoilerCosting:
         assert hasattr(model.fs.costing, "total_fixed_OM_cost")
         assert hasattr(model.fs.costing, "total_variable_OM_cost")
 
-        assert number_variables(model) == 3002
-        assert number_total_constraints(model) == 2971
+        assert number_variables(model) == 3001
+        assert number_total_constraints(model) == 2970
         assert number_unused_variables(model) == 12
 
     @pytest.mark.solver
@@ -200,8 +200,8 @@ class TestRetrofitNgccCosting:
         assert hasattr(model.fs.costing, "total_fixed_OM_cost")
         assert hasattr(model.fs.costing, "total_variable_OM_cost")
 
-        assert number_variables(model) == 2956
-        assert number_total_constraints(model) == 2925
+        assert number_variables(model) == 2955
+        assert number_total_constraints(model) == 2924
         assert number_unused_variables(model) == 12
 
     @pytest.mark.solver

@@ -3,87 +3,43 @@
 # Framework (IDAES IP) was produced under the DOE Institute for the
 # Design of Advanced Energy Systems (IDAES).
 #
-# Copyright (c) 2018-2023 by the software owners: The Regents of the
+# Copyright (c) 2018-2026 by the software owners: The Regents of the
 # University of California, through Lawrence Berkeley National Laboratory,
 # National Technology & Engineering Solutions of Sandia, LLC, Carnegie Mellon
 # University, West Virginia University Research Corporation, et al.
 # All rights reserved.  Please see the files COPYRIGHT.md and LICENSE.md
 # for full copyright and license information.
 #################################################################################
-""" """
+"""
+Costing model for the TSA 0D model.
+"""
+
 import os
 import json
 import textwrap
 from sys import stdout
 from pandas import DataFrame
 
-# import pytest
-import pandas as pd
 from pyomo.environ import (
-    Block,
-    check_optimal_termination,
-    ConcreteModel,
-    Constraint,
-    Param,
     units,
     value,
     Var,
-    Expression,
 )
 from pyomo.common.fileutils import this_file_dir
-from pyomo.util.check_units import assert_units_consistent
-from pyomo.common.config import ConfigValue
 
-from idaes.core import FlowsheetBlock, UnitModelBlock, UnitModelCostingBlock
+from idaes.core import UnitModelBlock, UnitModelCostingBlock
 from idaes.core.util.exceptions import ConfigurationError
-from idaes.core.solvers import get_solver
-from idaes.core.util.model_statistics import degrees_of_freedom
 import idaes.logger as idaeslog
 from idaes.core.util.tables import stream_table_dataframe_to_string
 from idaes.core.util.math import smooth_max
-
-from idaes.models.properties import iapws95
-
 
 from idaes.models_extra.power_generation.costing.power_plant_capcost import (
     QGESSCosting,
     QGESSCostingData,
 )
-import pyomo.environ as pyo
 
 directory = this_file_dir()
 _log = idaeslog.getLogger(__name__)
-
-# vacuum_pump_params = {
-#     "9": {
-#         "B": {
-#             "vac_2.9_eq1": {
-#                 "Account Name": "Vacuum pump quote for 2.9 psia",
-#                 "Exponent": 0.45,
-#                 "Process Parameter": "CO2 Flowrate",
-#                 "BEC": 47.8e6 / 1e3,  # 46e6/1e3,  # BEC in $1000 dollars
-#                 "BEC_units": "K$2018",
-#                 "Eng Fee": 0.2,
-#                 "Process Contingency": 0.18,
-#                 "Project Contingency": 0.2,
-#                 "RP Value": 77.00,
-#                 "Units": "MW",
-#             },
-#             "vac_6.5_eq1": {
-#                 "Account Name": "Vacuum pump quote for 6.5 psia",
-#                 "Exponent": 0.45,
-#                 "Process Parameter": "Absorber volume",
-#                 "BEC": 18.71e3,  # 18e6 / 1e3,
-#                 "BEC_units": "K$2018",
-#                 "Eng Fee": 0.2,
-#                 "Process Contingency": 0.18,
-#                 "Project Contingency": 0.2,
-#                 "RP Value": 63.00,
-#                 "Units": "MW",
-#             },
-#         }
-#     }
-# }
 
 
 def get_dac_costing_data(case):
@@ -474,33 +430,6 @@ def get_dac_costing(unit, costing_case):
         },
     )
 
-    # elif purge_pressure == 0.2:
-    #     unit.product_compression.costing = UnitModelCostingBlock(
-    #         flowsheet_costing_block=fs.costing,
-    #         costing_method=QGESSCostingData.get_PP_costing,
-    #         costing_method_arguments={
-    #             "cost_accounts": ["vac_2.9_eq1"],
-    #             "scaled_param": unit.compressor_power[0],
-    #             "tech": 9,
-    #             "ccs": "B",
-    #             "additional_costing_params": vacuum_pump_params,
-    #         },
-    #     )
-
-    # elif purge_pressure == 0.5:
-    #     unit.product_compression.costing = UnitModelCostingBlock(
-    #         flowsheet_costing_block=fs.costing,
-    #         costing_method=QGESSCostingData.get_PP_costing,
-    #         costing_method_arguments={
-    #             "cost_accounts": ["vac_6.5_eq1"],
-    #             "scaled_param": unit.compressor_power[0],
-    #             "units": "MW",
-    #             "tech": 9,
-    #             "ccs": "B",
-    #             "additional_costing_params": vacuum_pump_params,
-    #         },
-    #     )
-
     # 15.3 - DAC CO2 Compressor Aftercooler
     fs.compressor_aftercooler = UnitModelBlock()
     fs.compressor_aftercooler.costing = UnitModelCostingBlock(
@@ -589,37 +518,23 @@ def get_dac_costing(unit, costing_case):
         },
     )
 
-    # we need a custom method of calculating the total TPC to account for distributed vs centralized systems
-    distributed_systems = [
-        fs.vessels.costing,
-        fs.duct_dampers.costing,
-        fs.feed_fans.costing,
-        fs.desorption_gas_handling.costing,
-        fs.controls_equipment.costing,
-    ]
+    # total plant cost
+    TPC_list = {}
+    for o in fs.component_objects(descend_into=True):
+        # look for costing blocks
+        if hasattr(o, "costing") and hasattr(o.costing, "total_plant_cost"):
+            for k in o.costing.total_plant_cost.keys():
+                if k not in ["15.1", "15.4", "15.5"]:
+                    TPC_list[k] = o.costing.total_plant_cost[k]
+                if k in ["15.1"]:
+                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * unit.number_beds
+                if k in ["15.4", "15.5"]:
+                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
 
-    centralized_TPCs = []
-
-    for b in fs.costing._registered_unit_costing:
-        if b not in distributed_systems:
-            for key in b.total_plant_cost.keys():
-                centralized_TPCs.append(b.total_plant_cost[key])
-
-    fs.costing.total_TPC = Var(
-        initialize=100,
-        bounds=(0, 1e4),
-        doc="total TPC in $MM",
-    )
-
-    @fs.costing.Constraint()
-    def total_TPC_eq(b):
-        return b.total_TPC == sum(centralized_TPCs) + (
-            fs.vessels.costing.total_plant_cost["15.1"] / 120 * unit.number_beds
-            + fs.duct_dampers.costing.total_plant_cost["15.4"] * unit.number_beds / 2
-            + fs.feed_fans.costing.total_plant_cost["15.5"] * unit.number_beds / 2
-            + fs.desorption_gas_handling.costing.total_plant_cost["15.6"]
-            + fs.controls_equipment.costing.total_plant_cost["15.8"]
-        )
+    # Total plant cost of dac unit
+    @fs.costing.Expression(doc="total TPC for TSA system in $MM")
+    def total_TPC(b):
+        return sum(TPC_list.values())
 
     # resource consumption rates for variable costing
     capacity_factor = 0.85
@@ -670,13 +585,6 @@ def get_dac_costing(unit, costing_case):
 
     fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
     fs.costing.net_power.fix()
-
-    # if costing_case == "retrofit_ngcc":
-    #     fs.costing.steam_eq.deactivate()
-    #     fs.costing.steam.fix(0.0)
-
-    #     fs.costing.aux_power_eq.deactivate()
-    #     fs.costing.aux_power.fix(0.0)
 
     # resorces to be costed
     resources = [
@@ -738,39 +646,10 @@ def get_dac_costing(unit, costing_case):
         resources=resources,
         rates=rates,
         prices=prices,
-        fuel=None,
-        # waste=None,
-        # chemicals=None,
         tonne_CO2_capture=unit.total_CO2_captured_year,
     )
 
     fs.costing.costing_initialization()
-
-
-"""
-Centralized Systems
-- Water withdrawal and pretreating
-- Boiler feedwater system
-- Cooling tower and cooling water circulation
-- Waste water treatment
-- Electric equipment (Switchyard, transformers, ..)
-- Instrumentation and control equipment
-- Site preparation and facilities
-- Buildings
-- Electric boiler
-- CO2 compressor/vacuum pump
-
-Distributed Systems
-- DAC units (costed per brick)
-- Air ducts
-- Fans
-- Desorption gas handling
-- Steam distribution
-- DAC specific controls
-
-The distributed systems need to be multiplied by the number of units when added
-to the total plant cost.
-"""
 
 
 def print_dac_costing(unit):
