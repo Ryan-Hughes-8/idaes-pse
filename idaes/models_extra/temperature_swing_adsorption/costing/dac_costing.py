@@ -136,9 +136,9 @@ def get_dac_costing(unit, costing_case):
     # TODO: this compressor power is just from surrogates, for vacuum support, need to model with compressor unit model
     _pcal_dimless = (
         0.0012
-        * units.convert(unit.flow_mol_in_total, to_units=units.kmol / units.hr)
         * units.hr
         / units.kmol
+        * units.convert(unit.flow_mol_in_total, to_units=units.kmol / units.hr)
         - 2.2798
     )
     _warn_if_negative(_pcal_dimless, "product_compressor_auxiliary_load surrogate")
@@ -146,9 +146,9 @@ def get_dac_costing(unit, costing_case):
     # compressor aftercooler heat exchanger duty - from surrogates
     _cahd_dimless = (
         2e-6
-        * units.convert(unit.flow_mol_in_total, to_units=units.kmol / units.hr)
         * units.hr
         / units.kmol
+        * units.convert(unit.flow_mol_in_total, to_units=units.kmol / units.hr)
         - 7e-8
     )
     _warn_if_negative(_cahd_dimless, "compressor_aftercooler_heat_duty surrogate")
@@ -345,6 +345,22 @@ def get_dac_costing(unit, costing_case):
             units.kW,
         )
 
+        # gas flow to dac accounts
+        fs.gas_flow_to_dac = UnitModelBlock()
+        fs.gas_flow_to_dac.costing = UnitModelCostingBlock(
+            flowsheet_costing_block=fs.costing,
+            costing_method=QGESSCostingData.get_PP_costing,
+            costing_method_arguments={
+                "cost_accounts": ["7.3"],
+                "scaled_param": units.convert(
+                    unit.flow_mass_in_total, to_units=units.lb / units.hr
+                ),
+                "tech": 8,
+                "ccs": "B",
+                "additional_costing_params": costing_params,
+            },
+        )
+
         unit.steam_flow_system = UnitModelBlock()
         unit.steam_flow_system.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
@@ -365,7 +381,24 @@ def get_dac_costing(unit, costing_case):
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
-                "cost_accounts": ["11.2", "11.3", "11.4", "11.5", "11.6"],
+                # "cost_accounts": ["11.2", "11.3", "11.4", "11.5", "11.6"],
+                # TODO: check the discrepancy between these costing accounts
+                "cost_accounts": [
+                    "11.2",
+                    "11.3",
+                    "11.4",
+                    "11.5",
+                    "11.6",
+                    "12.1",
+                    "12.2",
+                    "12.3",
+                    "12.4",
+                    "12.5",
+                    "12.6",
+                    "12.7",
+                    "12.8",
+                    "12.9",
+                ],
                 "scaled_param": total_auxiliary_load,
                 "tech": 8,
                 "ccs": "B",
@@ -614,9 +647,13 @@ def get_dac_costing(unit, costing_case):
         )
 
     @fs.costing.Expression(fs.time)
-    def energy_purchased(b, t):  # in kWh/day
-        hr_per_day = 24 * units.hr / units.day
-        return total_auxiliary_load * hr_per_day
+    def energy_purchased(b, t):
+        if costing_case == "electric_boiler":
+            return units.convert(
+                total_auxiliary_load, to_units=units.kW * units.hr / units.day
+            )
+        elif costing_case == "retrofit_ngcc":
+            return 0 * units.kW * units.hr / units.day
 
     # TODO: add this back in
     # @fs.costing.Expression(fs.time)
@@ -626,17 +663,27 @@ def get_dac_costing(unit, costing_case):
 
     @fs.costing.Expression(fs.time)
     def steam_rate(b, t):
-        return units.convert(unit.flow_mass_steam, to_units=units.kg / units.day)
+        if costing_case == "electric_boiler":
+            return units.convert(unit.flow_mass_steam, to_units=units.kg / units.day)
+        elif costing_case == "retrofit_ngcc":
+            return 0 * units.kg / units.day
 
     fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
     fs.costing.net_power.fix()
+
+    # if costing_case == "retrofit_ngcc":
+    #     fs.costing.steam_eq.deactivate()
+    #     fs.costing.steam.fix(0.0)
+
+    #     fs.costing.aux_power_eq.deactivate()
+    #     fs.costing.aux_power.fix(0.0)
 
     # resorces to be costed
     resources = [
         "water",
         "water_treatment_chemicals",
-        "aux_power",
         "sorbent",
+        "aux_power",
         "waste_sorbent",
         # "boiler_feed_water", #TODO: add this back in
     ]
@@ -647,8 +694,8 @@ def get_dac_costing(unit, costing_case):
     rates = [
         fs.costing.water_use,
         fs.costing.water_treatment_chems,
-        fs.costing.energy_purchased,
         fs.costing.sorbent_rate,
+        fs.costing.energy_purchased,
         fs.costing.sorbent_rate,
         # fs.costing.bfw_rate, #TODO: add this back in
     ]
