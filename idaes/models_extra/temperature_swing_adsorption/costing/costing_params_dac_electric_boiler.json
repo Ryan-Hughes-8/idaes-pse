@@ -7,10 +7,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Receive & Unload",
                 "Exponent": 0.66,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "1.6": {
@@ -19,10 +19,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Stackout & Reclaim",
                 "Exponent": 0.64,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "1.7": {
@@ -31,10 +31,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Conveyors",
                 "Exponent": 0.65,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "1.8": {
@@ -43,10 +43,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Other Sorbent Handling",
                 "Exponent": 0.64,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "1.9": {
@@ -55,10 +55,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Handling Foundations",
                 "Exponent": 0.62,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "2.5": {
@@ -67,10 +67,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Preparation Equipment",
                 "Exponent": 0.65,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "2.6": {
@@ -79,10 +79,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Storage & Feed",
                 "Exponent": 0.65,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "2.9": {
@@ -91,10 +91,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Sorbent Feed Foundation",
                 "Exponent": 0.64,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "3.1": {
@@ -259,10 +259,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Spent Sorbent Storage Silos",
                 "Exponent": 0.56,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "10.7": {
@@ -271,10 +271,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Spent Sorbent Transport & Feed Equipment",
                 "Exponent": 0.56,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "10.9": {
@@ -283,10 +283,10 @@
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.2,
                 "RP Value": 6971.747671,
-                "Units": "ft3/d",
+                "Units": "ft^3/d",
                 "Account Name": "Spent Sorbent Foundation",
                 "Exponent": 0.56,
-                "Process Parameter": "DAC Sorbent Make-up Rate, ft3/d",
+                "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
                 "BEC_units": "K$2018"
             },
             "11.1": {
