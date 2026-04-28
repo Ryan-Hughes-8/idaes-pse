@@ -567,7 +567,7 @@ def get_dac_costing(unit, costing_case):
                 if k not in ["15.1", "15.4", "15.5"]:
                     TPC_list[k] = o.costing.total_plant_cost[k]
                 if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * unit.number_beds
+                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds
                 if k in ["15.4", "15.5"]:
                     TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
 
