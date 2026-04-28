@@ -697,16 +697,16 @@
                 "Process Parameter": "Feedwater Flow, lb/hr",
                 "BEC_units": "K$2018"
             },
-            "15.12": {
-                "BEC": 8533.89,
+            "15.10": {
+                "BEC": 10968,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0,
                 "Project Contingency": 0.15,
-                "RP Value": 497,
-                "Units": "hp",
-                "Account Name": "DAC Vacuum Compressors",
-                "Exponent": 0.61,
-                "Process Parameter": "Vacuum compressor aux load, hp",
+                "RP Value": 7641,
+                "Units": "m^3/hr",
+                "Account Name": "CO2 Interim Storage Vessel",
+                "Exponent": 0.9875,
+                "Process Parameter": "Gas throughput of interim storage vessel, m^3/hr",
                 "BEC_units": "K$2018"
             },
             "15.11": {
@@ -721,16 +721,16 @@
                 "Process Parameter": "Gas throughput of TEG dryer, lb/hr",
                 "BEC_units": "K$2018"
             },
-            "15.10": {
-                "BEC": 10968,
+            "15.12": {
+                "BEC": 8533.89,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0,
                 "Project Contingency": 0.15,
-                "RP Value": 7641,
-                "Units": "m^3/hr",
-                "Account Name": "CO2 Interim Storage Vessel",
-                "Exponent": 0.9875,
-                "Process Parameter": "Gas throughput of interim storage vessel, m^3/hr",
+                "RP Value": 497,
+                "Units": "hp",
+                "Account Name": "DAC Vacuum Compressors",
+                "Exponent": 0.61,
+                "Process Parameter": "Vacuum compressor aux load, hp",
                 "BEC_units": "K$2018"
             }
         }

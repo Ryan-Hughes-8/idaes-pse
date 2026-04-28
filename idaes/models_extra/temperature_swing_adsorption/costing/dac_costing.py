@@ -125,6 +125,18 @@ def get_dac_costing(unit, costing_case):
         to_units=units.lb / units.hr,
     )  # [lb/hr]
 
+    # assume most water was knocked out in vacuum (3% enters storage)
+    CO2_mole_frac = 1 - 0.03
+    kmol_p_hr_total = (
+        units.convert(CO2_product_mass_flow, to_units=units.kg / units.hr)
+        * units.kmol
+        / (44.01 * units.kg)
+        / CO2_mole_frac
+    )
+    dens = 1.8 * units.kg / units.m**3  # from Sorbent report stream table
+    MW = 43.146 * units.kg / units.kmol  # from Sorbent report stream table
+    CO2_storage_throughput = kmol_p_hr_total * MW / dens
+
     if costing_case == "electric_boiler":
         # raw water withdrawal flow rate - from surrogates
         # TODO: check which expression is correct (CDR has this as the correlation for ngcc)
@@ -512,6 +524,34 @@ def get_dac_costing(unit, costing_case):
         costing_method_arguments={
             "cost_accounts": ["15.8"],
             "scaled_param": total_auxiliary_load,
+            "tech": 8,
+            "ccs": "B",
+            "additional_costing_params": costing_params,
+        },
+    )
+
+    # 15.10 - CO2 interim storage vessel
+    fs.CO2_storage_vessel = UnitModelBlock()
+    fs.CO2_storage_vessel.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=fs.costing,
+        costing_method=QGESSCostingData.get_PP_costing,
+        costing_method_arguments={
+            "cost_accounts": ["15.10"],
+            "scaled_param": CO2_storage_throughput,
+            "tech": 8,
+            "ccs": "B",
+            "additional_costing_params": costing_params,
+        },
+    )
+
+    # 15.11 - DAC CO2 Dryer
+    fs.CO2_dryer = UnitModelBlock()
+    fs.CO2_dryer.costing = UnitModelCostingBlock(
+        flowsheet_costing_block=fs.costing,
+        costing_method=QGESSCostingData.get_PP_costing,
+        costing_method_arguments={
+            "cost_accounts": ["15.11"],
+            "scaled_param": CO2_product_mass_flow,
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,

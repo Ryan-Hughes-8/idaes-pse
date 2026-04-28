@@ -104,8 +104,8 @@ class TestElectricBoilerCosting:
         assert hasattr(model.fs.costing, "total_fixed_OM_cost")
         assert hasattr(model.fs.costing, "total_variable_OM_cost")
 
-        assert number_variables(model) == 3004
-        assert number_total_constraints(model) == 2973
+        assert number_variables(model) == 3008
+        assert number_total_constraints(model) == 2977
         assert number_unused_variables(model) == 12
 
     @pytest.mark.solver
@@ -200,8 +200,8 @@ class TestRetrofitNgccCosting:
         assert hasattr(model.fs.costing, "total_fixed_OM_cost")
         assert hasattr(model.fs.costing, "total_variable_OM_cost")
 
-        assert number_variables(model) == 2958
-        assert number_total_constraints(model) == 2927
+        assert number_variables(model) == 2962
+        assert number_total_constraints(model) == 2931
         assert number_unused_variables(model) == 12
 
     @pytest.mark.solver
