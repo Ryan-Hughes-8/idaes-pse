@@ -561,27 +561,35 @@ def get_dac_costing(unit, costing_case):
             ref_chem / ref_air
         )
 
-    @fs.costing.Expression(fs.time)
-    def energy_purchased(b, t):
-        if costing_case == "electric_boiler":
-            return units.convert(
-                total_auxiliary_load, to_units=units.kW * units.hr / units.day
-            )
-        elif costing_case == "retrofit_ngcc":
-            return 0 * units.kW * units.hr / units.day
+    fs.costing.energy_purchased = Var(
+        fs.time, initialize=1.0, units=units.kW * units.hr / units.day
+    )
+    fs.costing.steam_rate = Var(fs.time, initialize=1.0, units=units.kg / units.day)
 
-    # TODO: add this back in
+    @fs.costing.Constraint(fs.time)
+    def energy_purchased_eq(b, t):
+        return b.energy_purchased[t] == units.convert(
+            total_auxiliary_load, to_units=units.kW * units.hr / units.day
+        )
+
+    @fs.costing.Constraint(fs.time, doc="Equation for cost of steam")
+    def steam_eq(b, t):
+        return b.steam_rate[t] == units.convert(
+            unit.flow_mass_steam, to_units=units.kg / units.day
+        )
+
+    # TODO: add this as config argument
     # @fs.costing.Expression(fs.time)
     # def bfw_rate(b, t):
     #     hr_per_day = 24 * units.hr / units.day
     #     return unit.BFW_makeup[t] * hr_per_day
 
-    @fs.costing.Expression(fs.time)
-    def steam_rate(b, t):
-        if costing_case == "electric_boiler":
-            return units.convert(unit.flow_mass_steam, to_units=units.kg / units.day)
-        elif costing_case == "retrofit_ngcc":
-            return 0 * units.kg / units.day
+    if costing_case == "retrofit_ngcc":
+        fs.costing.energy_purchased_eq.deactivate()
+        fs.costing.energy_purchased.fix(0.0)
+
+    fs.costing.steam_eq.deactivate()
+    fs.costing.steam_rate.fix(0.0)
 
     fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
     fs.costing.net_power.fix()
@@ -593,10 +601,9 @@ def get_dac_costing(unit, costing_case):
         "sorbent",
         "aux_power",
         "waste_sorbent",
-        # "boiler_feed_water", #TODO: add this back in
+        "IP_steam",
+        # "boiler_feed_water", #TODO: add this as config argument
     ]
-    if costing_case == "retrofit_NGCC":
-        resources.append("IP_steam")
 
     # vars for resource consumption rates
     rates = [
@@ -605,10 +612,9 @@ def get_dac_costing(unit, costing_case):
         fs.costing.sorbent_rate,
         fs.costing.energy_purchased,
         fs.costing.sorbent_rate,
-        # fs.costing.bfw_rate, #TODO: add this back in
+        fs.costing.steam_rate,
+        # fs.costing.bfw_rate, #TODO: add this as config argument
     ]
-    if costing_case == "retrofit_NGCC":
-        rates.append(fs.costing.steam_rate)
 
     # resource prices
     prices = {
