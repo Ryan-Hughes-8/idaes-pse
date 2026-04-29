@@ -130,7 +130,7 @@ class TestElectricBoilerCosting:
         assert pytest.approx(27.3532, abs=1e-4) == value(
             model.fs.costing.total_fixed_OM_cost
         )
-        assert pytest.approx(585.534, abs=1e-2) == value(
+        assert pytest.approx(585.534, abs=1e-3) == value(
             model.fs.costing.total_variable_OM_cost[0]
         )
         assert pytest.approx(0.184897, abs=1e-6) == value(
