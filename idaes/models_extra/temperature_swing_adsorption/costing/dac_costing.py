@@ -426,10 +426,8 @@ def get_dac_costing(unit, costing_case):
         },
     )
 
-    # purge_pressure = unit.config.purge_pressure
     # 15.2 - DAC CO2 Compression & Drying
     fs.product_compression = UnitModelBlock()
-    # if purge_pressure == 1:
     fs.product_compression.costing = UnitModelCostingBlock(
         flowsheet_costing_block=fs.costing,
         costing_method=QGESSCostingData.get_PP_costing,
@@ -658,8 +656,7 @@ def get_dac_costing(unit, costing_case):
 
     # resource prices
     prices = {
-        # "sorbent": 4 * units.USD_2018 / units.ft**3,  # 4 or 100
-        "sorbent": 201 * units.USD_2018 / units.ft**3,
+        "sorbent": 100 * units.USD_2018 / units.ft**3,
         "aux_power": 0.06 * units.USD_2018 / units.kWh,
         "waste_sorbent": 0.86 * units.USD_2018 / units.ft**3,
         "IP_steam": 0.00733 * units.USD_2018 / units.kg,

@@ -124,16 +124,16 @@ class TestElectricBoilerCosting:
     @pytest.mark.skipif(solver is None, reason="Solver not available")
     def test_solution(self, model):
 
-        assert pytest.approx(79.1955, abs=1e-4) == value(
+        assert pytest.approx(76.6175, abs=1e-4) == value(
             model.fs.costing.annualized_cost
         )
-        assert pytest.approx(27.1399, abs=1e-4) == value(
+        assert pytest.approx(27.3532, abs=1e-4) == value(
             model.fs.costing.total_fixed_OM_cost
         )
-        assert pytest.approx(1090.57, abs=1e-2) == value(
+        assert pytest.approx(585.534, abs=1e-2) == value(
             model.fs.costing.total_variable_OM_cost[0]
         )
-        assert pytest.approx(0.317544, abs=1e-6) == value(
+        assert pytest.approx(0.184897, abs=1e-6) == value(
             model.fs.costing.cost_of_capture
         )
 
@@ -220,15 +220,15 @@ class TestRetrofitNgccCosting:
     @pytest.mark.skipif(solver is None, reason="Solver not available")
     def test_solution(self, model):
 
-        assert pytest.approx(81.1308, abs=1e-4) == value(
+        assert pytest.approx(78.5379, abs=1e-4) == value(
             model.fs.costing.annualized_cost
         )
-        assert pytest.approx(27.8940, abs=1e-4) == value(
+        assert pytest.approx(28.1026, abs=1e-4) == value(
             model.fs.costing.total_fixed_OM_cost
         )
-        assert pytest.approx(1020.94, abs=1e-2) == value(
+        assert pytest.approx(515.904, abs=1e-3) == value(
             model.fs.costing.total_variable_OM_cost[0]
         )
-        assert pytest.approx(0.300183, abs=1e-6) == value(
+        assert pytest.approx(0.167530, abs=1e-6) == value(
             model.fs.costing.cost_of_capture
         )
