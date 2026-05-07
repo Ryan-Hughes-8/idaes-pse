@@ -2,7 +2,7 @@
     "8": {
         "B": {
             "1.5": {
-                "BEC": 128.498495,
+                "BEC": 172.1828741,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -11,10 +11,10 @@
                 "Account Name": "Sorbent Receive & Unload",
                 "Exponent": 0.66,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "1.6": {
-                "BEC": 872.9568973,
+                "BEC": 1169.727532,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -23,10 +23,10 @@
                 "Account Name": "Sorbent Stackout & Reclaim",
                 "Exponent": 0.64,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "1.7": {
-                "BEC": 1614.429133,
+                "BEC": 2163.270846,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -35,10 +35,10 @@
                 "Account Name": "Sorbent Conveyors",
                 "Exponent": 0.65,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "1.8": {
-                "BEC": 94.40919641,
+                "BEC": 126.5045693,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -47,10 +47,10 @@
                 "Account Name": "Other Sorbent Handling",
                 "Exponent": 0.64,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "1.9": {
-                "BEC": 1638.864467,
+                "BEC": 2196.013222,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -59,10 +59,10 @@
                 "Account Name": "Coal & Sorbent Handling Foundations",
                 "Exponent": 0.62,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "2.5": {
-                "BEC": 612.9804564,
+                "BEC": 821.3694386,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -71,10 +71,10 @@
                 "Account Name": "Sorbent Preparation Equipment",
                 "Exponent": 0.65,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "2.6": {
-                "BEC": 1133.87312,
+                "BEC": 1519.344897,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -83,10 +83,10 @@
                 "Account Name": "Sorbent Storage & Feed",
                 "Exponent": 0.65,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "2.9": {
-                "BEC": 619.5825845,
+                "BEC": 830.2160277,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -95,10 +95,10 @@
                 "Account Name": "Coal & Sorbent Feed Foundation",
                 "Exponent": 0.64,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "7.3": {
-                "BEC": 15000.0,
+                "BEC": 20100.0,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -107,10 +107,10 @@
                 "Account Name": "Flue Gas Duct to DAC",
                 "Exponent": 0.7,
                 "Process Parameter": "Gas Flow to DAC, lb/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "8.4": {
-                "BEC": 13209.9322,
+                "BEC": 17700.06,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -119,10 +119,10 @@
                 "Account Name": "Steam Piping",
                 "Exponent": 0.7,
                 "Process Parameter": "DAC Steam Requirement, lb/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "10.6": {
-                "BEC": 2177.73839,
+                "BEC": 2918.082853,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -131,10 +131,10 @@
                 "Account Name": "Ash Spent Sorbent Storage Silos",
                 "Exponent": 0.56,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "10.7": {
-                "BEC": 3633.11065,
+                "BEC": 4868.223813,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
@@ -143,10 +143,10 @@
                 "Account Name": "Ash Spent Sorbent Transport & Feed Equipment",
                 "Exponent": 0.56,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "10.9": {
-                "BEC": 832.2332779,
+                "BEC": 1115.159502,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.2,
@@ -155,307 +155,307 @@
                 "Account Name": "Ash/Spent Sorbent Foundation",
                 "Exponent": 0.56,
                 "Process Parameter": "DAC Sorbent Make-up Rate, ft^3/d",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "11.2": {
-                "BEC": 1569.216165,
+                "BEC": 2602.075408,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Station Service Equipment",
                 "Exponent": 0.64,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "11.3": {
-                "BEC": 2421.555509,
+                "BEC": 4015.425139,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Switchgear & Motor Control ",
                 "Exponent": 0.64,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "11.4": {
-                "BEC": 1935.71742,
+                "BEC": 3209.80806,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Conduit & Cable Tray",
                 "Exponent": 0.64,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "11.5": {
-                "BEC": 2075.112988,
+                "BEC": 3440.953894,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Wire & Cable",
                 "Exponent": 0.64,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "11.6": {
-                "BEC": 185.6195804,
+                "BEC": 264.2038497,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Protective Equipment",
                 "Exponent": 1.1,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.1": {
-                "BEC": 86.71643569,
+                "BEC": 407.8896078,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Natural Gas Combined Cycle Control Equipment",
                 "Exponent": 0.13,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.2": {
-                "BEC": 142.7338809,
+                "BEC": 671.3798398,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Combustion Turbine Control Equipment",
                 "Exponent": 0.13,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.3": {
-                "BEC": 138.937654,
+                "BEC": 653.5234614,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Steam Turbine Control Equipment",
                 "Exponent": 0.13,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.4": {
-                "BEC": 260.9148323,
+                "BEC": 1033.999818,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.05,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Other Major Component Control Equipment",
                 "Exponent": 0.16,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.5": {
-                "BEC": 122.3723694,
+                "BEC": 575.6050439,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Signal Processing Equipment",
                 "Exponent": 0.13,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.6": {
-                "BEC": 56.55103482,
+                "BEC": 224.1105238,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.05,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Control Boards, Panels & Racks",
                 "Exponent": 0.16,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.7": {
-                "BEC": 2012.872992,
+                "BEC": 7976.971983,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.05,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Distributed Control System Equipment",
                 "Exponent": 0.16,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.8": {
-                "BEC": 806.2919274,
+                "BEC": 3195.317411,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.05,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Instrument Wiring & Tubing",
                 "Exponent": 0.16,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "12.9": {
-                "BEC": 370.3451201,
+                "BEC": 1467.669674,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.05,
                 "Project Contingency": 0.15,
-                "RP Value": 79400.0,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "Other Instrumentation & Controls Equipment",
                 "Exponent": 0.16,
                 "Process Parameter": "Total Plant Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.1": {
-                "BEC": 507.75,
+                "BEC": 637.836299,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 14137,
+                "RP Value": 14137.155,
                 "Units": "ft^3",
                 "Account Name": "DAC Adsorption/Desorption Vessels (per single vessel)",
                 "Exponent": 0.6,
                 "Process Parameter": "Volume for 1 vessel , ft^3",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.2": {
-                "BEC": 2950.856,
+                "BEC": 5044.482652,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 1490,
+                "RP Value": 1940.0,
                 "Units": "kW",
                 "Account Name": "DAC CO2 Compression & Drying",
                 "Exponent": 0.41,
                 "Process Parameter": "Compressor Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.3": {
-                "BEC": 110.45,
+                "BEC": 183.0583985,
                 "Eng Fee": 0.2,
-                "Process Contingency": 0,
+                "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 3.0,
+                "RP Value": 3.89039337,
                 "Units": "MBtu/hr",
                 "Account Name": "DAC CO2 Compressor Aftercooler",
                 "Exponent": 0.83,
                 "Process Parameter": "Heat Exchanger Duty, MMBtu/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.4": {
-                "BEC": 870.165,
+                "BEC": 1083.133847,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 1768706.511,
+                "RP Value": 1727897.533,
                 "Units": "lb/hr",
                 "Account Name": "DAC System Air Handling Duct & Dampers",
                 "Exponent": 0.8,
                 "Process Parameter": "Inlet Air Flow to 2 beds, lb/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.5": {
-                "BEC": 1410.533,
+                "BEC": 1960.677345,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 1326.44,
+                "RP Value": 1295.833333,
                 "Units": "kW",
                 "Account Name": "DAC System Air Handling Fans",
                 "Exponent": 0.8,
                 "Process Parameter": "Auxiliary load in kW for 2 beds",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.6": {
-                "BEC": 1011.232,
+                "BEC": 1587.517893,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 29608,
+                "RP Value": 38566.6729,
                 "Units": "lb/hr",
                 "Account Name": "DAC Desorption Process Gas Handling System",
                 "Exponent": 0.6,
                 "Process Parameter": "DAC CO2 Product Flow Rate, lb/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.7": {
-                "BEC": 1733.96,
+                "BEC": 4723.420965,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 58068,
+                "RP Value": 75637.2185,
                 "Units": "lb/hr",
                 "Account Name": "DAC Steam Distribution System",
                 "Exponent": 0.7,
                 "Process Parameter": "DAC Steam Flow Rate, lb/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.8": {
-                "BEC": 645.55,
+                "BEC": 878.3600159,
                 "Eng Fee": 0.2,
                 "Process Contingency": 0.1,
                 "Project Contingency": 0.15,
-                "RP Value": 80878,
+                "RP Value": 85915.6872,
                 "Units": "kW",
                 "Account Name": "DAC System Controls Equipment",
                 "Exponent": 0.15,
                 "Process Parameter": "Total DAC Auxiliary Load, kW",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.10": {
-                "BEC": 10968,
+                "BEC": 14697.12,
                 "Eng Fee": 0.2,
-                "Process Contingency": 0,
+                "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 7641,
+                "RP Value": 7641.0,
                 "Units": "m^3/hr",
                 "Account Name": "CO2 Interim Storage Vessel",
                 "Exponent": 0.9875,
                 "Process Parameter": "Gas throughput of interim storage vessel, m^3/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.11": {
-                "BEC": 1994.85,
+                "BEC": 2673.099,
                 "Eng Fee": 0.2,
-                "Process Contingency": 0,
+                "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
                 "RP Value": 29688.24,
                 "Units": "lb/hr",
                 "Account Name": "DAC CO2 Dryer",
                 "Exponent": 0.6,
                 "Process Parameter": "Gas throughput of TEG dryer, lb/hr",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             },
             "15.12": {
-                "BEC": 8533.89,
+                "BEC": 11435.4126,
                 "Eng Fee": 0.2,
-                "Process Contingency": 0,
+                "Process Contingency": 0.0,
                 "Project Contingency": 0.15,
-                "RP Value": 497,
+                "RP Value": 497.0,
                 "Units": "hp",
                 "Account Name": "DAC Vacuum Compressors",
                 "Exponent": 0.61,
                 "Process Parameter": "Vacuum compressor aux load, hp",
-                "BEC_units": "K$2018"
+                "BEC_units": "K$2023"
             }
         }
     }
