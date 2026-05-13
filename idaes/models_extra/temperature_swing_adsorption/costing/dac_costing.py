@@ -377,7 +377,7 @@ def get_dac_costing(unit, costing_case):
         raise ConfigurationError("costing case not defined.")
 
     # sorbent makeup accounts
-    sorbent_lifespan = 0.5
+    sorbent_lifespan = 1
 
     sorbent_makeup_rate = (
         units.convert(unit.bed_volume, to_units=units.ft**3)
