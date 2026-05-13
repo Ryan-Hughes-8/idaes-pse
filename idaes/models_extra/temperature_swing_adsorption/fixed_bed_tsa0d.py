@@ -98,23 +98,6 @@ class Adsorbent(Enum):
     zeolite_13x = 1
     mmen_mg_mof_74 = 2
     polystyrene_amine = 3
-    calf_20 = 4
-    custom = 5
-
-
-class IsothermModel(Enum):
-    """
-    Enum for supported isotherm models to use with custom adsorbent
-    """
-
-    none = 0
-    Langmuir = 1
-    dual_site_Langmuir = 2
-    weighted_DSL = 3
-    extended_Sips = 4
-    Toth = 5
-    Henry = 6
-    Langmuir_Freundlich = 7
 
 
 class SteamCalculationType(Enum):
@@ -155,28 +138,7 @@ class FixedBedTSA0DData(UnitModelBlockData):
             doc="""Flag to set adsorbent related properties and isotherms.
 - Adsorbent.zeolite_13x (default)
 - Adsorbent.mmen_mg_mof_74
-- Adsorbent.polystyrene_amine
-- Adsorbent.calf_20
-- Adsorbent.custom""",
-        ),
-    )
-    CONFIG.declare(
-        "isotherm_model",
-        ConfigValue(
-            default=IsothermModel.none,
-            domain=In(IsothermModel),
-            description="Isotherm model flag to use with custom adsorbent",
-            doc="""Flag to set adsorbent isotherm model for custom adsorbent.
-Default value is none which will throw an exception when called, an actual 
-model must be specified when custom sorbent is declared.
-- IsothermModel.none (default)
-- IsothermModel.Langmuir
-- IsothermModel.dual_site_Langmuir
-- IsothermModel.weighted_DSL
-- IsothermModel.extended_Sips
-- IsothermModel.Toth
-- IsothermModel.Henry
-- IsothermModel.Langmuir_Freundlich""",
+- Adsorbent.polystyrene_amine""",
         ),
     )
     CONFIG.declare(
@@ -368,26 +330,6 @@ The property package must be iapws95.
                 "but no property package was provided"
             )
 
-        # consistency check for adsorbent and isotherm model config options
-        if (
-            self.config.adsorbent == Adsorbent.custom
-            and self.config.isotherm_model == IsothermModel.none
-        ):
-            raise ConfigurationError(
-                "{} was not provided an isotherm model to use with the custom adsorbent. Please provide a valid model using the IsothermModel class.".format(
-                    self.name
-                )
-            )
-
-        if (
-            self.config.adsorbent != Adsorbent.custom
-            and self.config.isotherm_model != IsothermModel.none
-        ):
-            _log.warning(
-                "An isotherm model was specified for a named adsorbent. The specified isotherm model will be ignored and the "
-                "isotherm model contained within the construction of the named adsorbent will be used instead."
-            )
-
         # determine if number of beds is fixed or calculated
         if self.config.number_of_beds is None:
             self.calculate_beds = True
@@ -404,24 +346,6 @@ The property package must be iapws95.
             self._add_parameters_mmen_Mg_MOF_74()
         elif self.config.adsorbent == Adsorbent.polystyrene_amine:
             self._add_parameters_polystyrene_amine()
-        elif self.config.adsorbent == Adsorbent.calf_20:
-            self._add_parameters_calf_20()
-        elif self.config.adsorbent == Adsorbent.custom:
-            self._add_parameters_custom()
-            if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                add_dual_site_Langmuir_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.extended_Sips:
-                add_extended_Sips_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.weighted_DSL:
-                add_weighted_DSL_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Toth:
-                add_Toth_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Langmuir:
-                add_Langmuir_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Henry:
-                add_Henry_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
-                add_Langmuir_Freundlich_parameters(blk=self)
 
         # add design and operating variables
         self.flow_mol_in_total = Var(
@@ -1016,139 +940,6 @@ The property package must be iapws95.
             initialize={"CO2": 62.2, "N2": 0.0},
             units=units.kJ / units.mol,
             doc="Characteristic energy for the affinity parameter",
-        )
-
-    def _add_parameters_calf_20(self):
-        """
-        Method to add adsorbent related parameters to run fixed bed TSA model.
-        This method is to add parameters for CALF 20.
-
-        Reference:
-
-        """
-        # adsorbent parameters
-        self.bed_voidage = Param(
-            initialize=0.4,
-            units=units.dimensionless,
-            doc="Bed voidage - external or interparticle porosity",
-        )
-        self.particle_voidage = Param(
-            initialize=0.35,
-            units=units.dimensionless,
-            doc="Particle voidage - internal or intraparticle porosity",
-        )
-        self.heat_transfer_coeff = Param(
-            initialize=16.8,
-            units=units.J / units.m**2 / units.s / units.K,
-            doc="Global heat transfer coefficient bed-wall",
-        )
-        self.cp_mass_sol = Param(
-            initialize=1371,
-            units=units.J / units.kg / units.K,
-            doc="Heat capacity of adsorbent",
-        )
-        self.dens_mass_sol = Param(
-            initialize=570,
-            units=units.kg / units.m**3,
-            doc="Density of adsorbent",
-        )
-        self.particle_dia = Param(
-            initialize=2e-3, units=units.m, doc="Particle diameter"
-        )
-        # isotherm parameters
-        self.dh_ads = Param(
-            self.isotherm_components,
-            initialize={"CO2": -37000, "N2": 0},
-            units=units.J / units.mol,
-            doc="Heat of adsorption",
-        )
-        self.temperature_ref = Param(
-            initialize=298.15,
-            units=units.K,
-            doc="Reference temperature",
-        )
-        self.saturation_capacity_site_b = Param(
-            self.isotherm_components,
-            initialize={"CO2": 2.387, "N2": 0.0},
-            units=units.mol / units.kg,
-            doc="saturation capacity at site b",
-        )
-        self.saturation_capacity_site_d = Param(
-            self.isotherm_components,
-            initialize={"CO2": 3.2711, "N2": 0.0},
-            units=units.mol / units.kg,
-            doc="saturation capacity at site d",
-        )
-        self.dual_site_langmuir_constant_pre_exp_b = Param(
-            self.isotherm_components,
-            initialize={"CO2": 5.519e-7, "N2": 0.0},
-            units=units.meter**3 / units.mol,
-            doc="dual site langmuir constant for site b",
-        )
-        self.dual_site_langmuir_constant_pre_exp_d = Param(
-            self.isotherm_components,
-            initialize={"CO2": 5.187e-08, "N2": 0.0},
-            units=units.meter**3 / units.mol,
-            doc="dual site langmuir constant for site d",
-        )
-        self.internal_energy_b = Param(
-            self.isotherm_components,
-            initialize={"CO2": -35.06, "N2": 0.0},
-            units=units.kJ / units.mol,
-            doc="internal energy of site b",
-        )
-        self.internal_energy_d = Param(
-            self.isotherm_components,
-            initialize={"CO2": -28.95, "N2": 0.0},
-            units=units.kJ / units.mol,
-            doc="internal energy of site d",
-        )
-
-    def _add_parameters_custom(self):
-        """
-        Method to add adsorbent related parameters to run fixed bed TSA model.
-        This method is to add parameters for a custom adsorbent. Default values taken
-        from the method for calf_20. Note: this differs from named adsorbent method
-        by not adding isotherm parameters. A separate method is used for that.
-
-        Reference:
-
-        """
-        # adsorbent parameters
-        self.bed_voidage = Param(
-            initialize=0.4,
-            units=units.dimensionless,
-            doc="Bed voidage - external or interparticle porosity",
-        )
-        self.particle_voidage = Param(
-            initialize=0.35,
-            units=units.dimensionless,
-            doc="Particle voidage - internal or intraparticle porosity",
-        )
-        self.heat_transfer_coeff = Param(
-            initialize=16.8,
-            units=units.J / units.m**2 / units.s / units.K,
-            doc="Global heat transfer coefficient bed-wall",
-        )
-        self.cp_mass_sol = Param(
-            initialize=1371,
-            units=units.J / units.kg / units.K,
-            doc="Heat capacity of adsorbent",
-        )
-        self.dens_mass_sol = Param(
-            initialize=570,
-            units=units.kg / units.m**3,
-            doc="Density of adsorbent",
-        )
-        self.particle_dia = Param(
-            initialize=2e-3, units=units.m, doc="Particle diameter"
-        )
-
-        self.dh_ads = Param(
-            self.isotherm_components,
-            initialize={"CO2": -37000, "N2": 0},
-            units=units.J / units.mol,
-            doc="Heat of adsorption",
         )
 
     def _add_inlet_port(self):
@@ -2146,26 +1937,6 @@ The property package must be iapws95.
         elif self.config.adsorbent == Adsorbent.polystyrene_amine:
             return self._isotherm_polystyrene_amine(i, pressure, temperature)
 
-        elif self.config.adsorbent == Adsorbent.calf_20:
-            return self._isotherm_calf_20(i, pressure, temperature)
-
-        elif self.config.adsorbent == Adsorbent.custom:
-
-            if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                return dual_site_Langmuir_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.extended_Sips:
-                return extended_Sips_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.weighted_DSL:
-                return weighted_DSL_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Toth:
-                return Toth_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Langmuir:
-                return Langmuir_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Henry:
-                return Henry_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
-                return Langmuir_Freundlich_isotherm(self, i, pressure, temperature)
-
     # TODO: develop a property package framework for adsorbents
     def _isotherm_zeolite_13x(self, i, pressure, temperature):
         """
@@ -2387,80 +2158,6 @@ The property package must be iapws95.
 
         elif i == "N2":
             # no adsorption is assumed of N2 in this adsorbent
-            loading[i] = 1e-10 * units.mol / units.kg
-
-        return loading[i]
-
-    def _isotherm_calf_20(self, i, pressure, temperature):
-        """
-        Method to add isotherm for components.
-        Isotherm equation: Dual site Langmuir (DSL) isotherm
-        Adsorbent: CALF-20
-
-        NOTE: N2 adsorption is negligible as it is assumed to be an inert.
-        Therefore, CO2 is considered as the only adsorbing component
-
-        Keyword Arguments:
-            i : component
-            pressure : partial pressure of components
-            temperature : temperature
-
-        """
-        T = temperature
-        p = {}
-        c = {}
-        loading = {}
-
-        for j in self.isotherm_components:
-            p[j] = units.convert(pressure[j], to_units=units.bar)
-            c[j] = units.convert(
-                (p[j] / const.gas_constant / T), to_units=units.mol / units.meter**3
-            )
-
-        if i == "CO2":
-
-            dual_site_langmuir_constant_b = self.dual_site_langmuir_constant_pre_exp_b[
-                i
-            ] * exp(
-                units.convert(
-                    -self.internal_energy_b[i],
-                    to_units=units.J / units.mol,
-                )
-                / const.gas_constant
-                / T
-            )
-
-            dual_site_langmuir_constant_d = self.dual_site_langmuir_constant_pre_exp_d[
-                i
-            ] * exp(
-                units.convert(
-                    -self.internal_energy_d[i],
-                    to_units=units.J / units.mol,
-                )
-                / const.gas_constant
-                / T
-            )
-
-            # portion of the isotherm for site b
-            loading_b = (
-                self.saturation_capacity_site_b[i]
-                * dual_site_langmuir_constant_b
-                * c[i]
-                / (1 + dual_site_langmuir_constant_b * c[i])
-            )
-
-            # portion of the isotherm for site d
-            loading_d = (
-                self.saturation_capacity_site_d[i]
-                * dual_site_langmuir_constant_d
-                * c[i]
-                / (1 + dual_site_langmuir_constant_d * c[i])
-            )
-
-            loading[i] = loading_b + loading_d  # [mol/kg]
-
-        elif i == "N2":
-            # no adsorption is assumed of N2 in CALF-20
             loading[i] = 1e-10 * units.mol / units.kg
 
         return loading[i]
