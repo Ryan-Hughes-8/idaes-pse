@@ -84,8 +84,6 @@ from idaes.models.unit_models.pressure_changer import (
 
 import idaes.logger as idaeslog
 
-from idaes.models_extra.temperature_swing_adsorption.isotherm_models import *
-
 __author__ = "Daison Yancy Caballero, Alex Noring"
 
 # Set up logger
