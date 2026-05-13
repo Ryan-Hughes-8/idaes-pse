@@ -11,8 +11,12 @@
 # for full copyright and license information.
 #################################################################################
 """
-Costing model for the TSA 0D model.
+Costing models for a direct air capture (DAC) plant. The fixed-bed temperature
+swing adsorption model used to represent the DAC process should be passed as an
+argument to the costing functions.
 """
+
+__author__ = "Daison Yancy Caballero, Ryan Hughes"
 
 import os
 import json
@@ -89,7 +93,6 @@ def get_dac_costing(unit, costing_case):
     # reference parameters for accounts ==============================
     # === accounts present for both costing cases ===
     # compressor auxiliary load - from surrogates
-    # TODO: this compressor power is just from surrogates, for vacuum support, need to model with compressor unit model
     _pcal_dimless = (
         0.0012
         * units.hr
@@ -160,7 +163,6 @@ def get_dac_costing(unit, costing_case):
             / units.hr
         )  # [MMBtu/hr]
         # circulating water flow_rate - from surrogates
-        # TODO: replace with 100*cooling_tower_duty*units_adjustment
         circulating_water_flow_rate = (
             (3.0797e-02 * CO2_product_mass_flow * units.hr / units.lb + 2.5000e03)
             * units.gal
@@ -349,8 +351,6 @@ def get_dac_costing(unit, costing_case):
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
-                # "cost_accounts": ["11.2", "11.3", "11.4", "11.5", "11.6"],
-                # TODO: check the discrepancy between these costing accounts
                 "cost_accounts": [
                     "11.2",
                     "11.3",
@@ -455,7 +455,6 @@ def get_dac_costing(unit, costing_case):
     )
 
     # 15.4 - DAC System Air Handling Duct and Dampers (1 system per 2 beds)
-    # TODO: double check the 1 unit per two beds assumption here
     fs.duct_dampers = UnitModelBlock()
     fs.duct_dampers.costing = UnitModelCostingBlock(
         flowsheet_costing_block=fs.costing,
@@ -616,12 +615,6 @@ def get_dac_costing(unit, costing_case):
             unit.flow_mass_steam, to_units=units.kg / units.day
         )
 
-    # TODO: add this as config argument
-    # @fs.costing.Expression(fs.time)
-    # def bfw_rate(b, t):
-    #     hr_per_day = 24 * units.hr / units.day
-    #     return unit.BFW_makeup[t] * hr_per_day
-
     if costing_case == "retrofit_ngcc":
         fs.costing.energy_purchased_eq.deactivate()
         fs.costing.energy_purchased.fix(0.0)
@@ -640,7 +633,6 @@ def get_dac_costing(unit, costing_case):
         "aux_power",
         "waste_sorbent",
         "IP_steam",
-        # "boiler_feed_water", #TODO: add this as config argument
     ]
 
     # vars for resource consumption rates
@@ -651,7 +643,6 @@ def get_dac_costing(unit, costing_case):
         fs.costing.energy_purchased,
         fs.costing.sorbent_rate,
         fs.costing.steam_rate,
-        # fs.costing.bfw_rate, #TODO: add this as config argument
     ]
 
     # resource prices

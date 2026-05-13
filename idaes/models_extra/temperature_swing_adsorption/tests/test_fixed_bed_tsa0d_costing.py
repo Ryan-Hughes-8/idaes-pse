@@ -11,7 +11,7 @@
 # for full copyright and license information.
 #################################################################################
 """
-Tests for the TSA 0D costing model.
+Tests for the direct air capture costing model.
 """
 
 __author__ = "Alex Noring, Ryan Hughes"
