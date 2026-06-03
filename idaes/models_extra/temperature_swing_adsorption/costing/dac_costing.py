@@ -119,11 +119,46 @@ def get_dac_costing(unit, costing_case):
         units.kW,
     )  # [kW]
 
+    # sorbent makeup
+    sorbent_lifespan = 1
+
+    _sorbent_makeup_rate_dimless = (
+        units.convert(unit.bed_volume, to_units=units.ft**3)
+        * (1 - unit.bed_voidage)
+        * unit.number_beds
+        / sorbent_lifespan
+        / 365
+        / units.ft**3
+    )
+
+    _warn_if_negative(_sorbent_makeup_rate_dimless, "sorbent_makeup_rate")
+    sorbent_makeup_rate = _nonneg(
+        _sorbent_makeup_rate_dimless * units.ft**3 / units.day, units.ft**3 / units.day
+    )
+
     # CO2 product mass flow rate - from model
-    CO2_product_mass_flow = units.convert(
-        unit.mw["CO2"] * unit.flow_mol_co2_rich_stream[0, "CO2"],
-        to_units=units.lb / units.hr,
-    )  # [lb/hr]
+    _CO2_product_mass_flow_dimless = (
+        units.convert(
+            unit.mw["CO2"] * unit.flow_mol_co2_rich_stream[0, "CO2"],
+            to_units=units.lb / units.hr,
+        )
+        * units.hr
+        / units.lb
+    )
+    _warn_if_negative(_CO2_product_mass_flow_dimless, "CO2_product_mass_flow")
+    CO2_product_mass_flow = _nonneg(
+        _CO2_product_mass_flow_dimless * units.lb / units.hr, units.lb / units.hr
+    )
+
+    _flow_mass_steam_dimless = (
+        units.convert(unit.flow_mass_steam, to_units=units.lb / units.hr)
+        * units.hr
+        / units.lb
+    )
+    _warn_if_negative(_flow_mass_steam_dimless, "flow_mass_steam_lbph")
+    flow_mass_steam_lbph = _nonneg(
+        _flow_mass_steam_dimless * units.lb / units.hr, units.lb / units.hr
+    )
 
     # assume most water was knocked out in vacuum (3% enters storage)
     CO2_mole_frac = 1 - 0.03
@@ -168,12 +203,7 @@ def get_dac_costing(unit, costing_case):
         )  # [gpm]
         # boiler auxiliary load - from surrogates
         boiler_auxiliary_load = _nonneg(
-            0.000335999
-            * units.convert(unit.flow_mass_steam, to_units=units.lb / units.hr)
-            * units.hr
-            / units.lb
-            * 1e3
-            * units.kW,
+            0.000335999 * flow_mass_steam_lbph * units.hr / units.lb * 1e3 * units.kW,
             units.kW,
         )  # convert MW to kW
         # total auxiliary load
@@ -204,9 +234,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["3.1", "3.3", "3.5"],
-                "scaled_param": units.convert(
-                    unit.flow_mass_steam, to_units=units.lb / units.hr
-                ),
+                "scaled_param": flow_mass_steam_lbph,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -296,9 +324,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["15.9"],
-                "scaled_param": units.convert(
-                    unit.flow_mass_steam, to_units=units.lb / units.hr
-                ),
+                "scaled_param": flow_mass_steam_lbph,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -335,9 +361,7 @@ def get_dac_costing(unit, costing_case):
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
                 "cost_accounts": ["8.4"],
-                "scaled_param": units.convert(
-                    unit.flow_mass_steam, to_units=units.lb / units.hr
-                ),
+                "scaled_param": flow_mass_steam_lbph,
                 "tech": 8,
                 "ccs": "B",
                 "additional_costing_params": costing_params,
@@ -375,18 +399,6 @@ def get_dac_costing(unit, costing_case):
         )
     else:
         raise ConfigurationError("costing case not defined.")
-
-    # sorbent makeup accounts
-    sorbent_lifespan = 1
-
-    sorbent_makeup_rate = (
-        units.convert(unit.bed_volume, to_units=units.ft**3)
-        * (1 - unit.bed_voidage)
-        * unit.number_beds
-        / sorbent_lifespan
-        / 365
-        / units.day
-    )
 
     fs.sorbent_makeup = UnitModelBlock()
     fs.sorbent_makeup.costing = UnitModelCostingBlock(
@@ -505,9 +517,7 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.7"],
-            "scaled_param": units.convert(
-                unit.flow_mass_steam, to_units=units.lb / units.hr
-            ),
+            "scaled_param": flow_mass_steam_lbph,
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -613,7 +623,7 @@ def get_dac_costing(unit, costing_case):
     @fs.costing.Constraint(fs.time, doc="Equation for cost of steam")
     def steam_eq(b, t):
         return b.steam_rate[t] == units.convert(
-            unit.flow_mass_steam, to_units=units.kg / units.day
+            flow_mass_steam_lbph, to_units=units.kg / units.day
         )
 
     # TODO: add this as config argument
@@ -690,6 +700,7 @@ def get_dac_costing(unit, costing_case):
         rates=rates,
         prices=prices,
         tonne_CO2_capture=unit.total_CO2_captured_year,
+        CE_index_year="2023",
     )
 
     fs.costing.costing_initialization()
@@ -706,7 +717,7 @@ def print_dac_costing(unit):
                 if k not in ["15.1", "15.4", "15.5"]:
                     TPC_list[k] = o.costing.total_plant_cost[k]
                 if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] / 120 * unit.number_beds
+                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds
                 if k in ["15.4", "15.5"]:
                     TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
 
