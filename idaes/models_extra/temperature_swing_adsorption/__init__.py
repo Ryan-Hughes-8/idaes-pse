@@ -18,3 +18,4 @@ from .fixed_bed_tsa0d import (
     IsothermModel,
 )
 from .initializer import FixedBedTSA0DInitializer
+from .scaler_object import TSA0DScaler
