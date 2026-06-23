@@ -179,7 +179,7 @@ class TSA0DScaler(CustomScalerBase):
             for c in model.flow_mol_co2_rich_stream_eq.values():
                 self.scale_constraint_by_nominal_value(
                     c,
-                    scheme=ConstraintScalingScheme.inverseMaximum,
+                    scheme=ConstraintScalingScheme.inverseSum,  # best jacobian norm
                     overwrite=overwrite,
                 )
 
@@ -288,9 +288,9 @@ class TSA0DScaler(CustomScalerBase):
         for t in model.heating.time_domain:
             for c in model.isotherm_components:
                 if c == "CO2":
-                    sf = 1e2
+                    sf = 1e0
                 else:
-                    sf = 1e3
+                    sf = 1e2
                 self.set_variable_scaling_factor(
                     model.heating.mole_frac_dt[t, c], sf, overwrite
                 )
@@ -408,7 +408,7 @@ class TSA0DScaler(CustomScalerBase):
         for t in model.cooling.time_domain:
             for c in model.isotherm_components:
                 if c == "CO2":
-                    sf = 1e1
+                    sf = 1e0
                 else:
                     sf = 1e5
                 self.set_variable_scaling_factor(
@@ -417,7 +417,7 @@ class TSA0DScaler(CustomScalerBase):
 
         for t in model.cooling.time_domain:
             self.set_variable_scaling_factor(
-                model.cooling.pressure_dt[t], 1e-4, overwrite
+                model.cooling.pressure_dt[t], 1e-5, overwrite
             )
 
     def cooling_step_constraint_scaling_routine(
@@ -668,7 +668,7 @@ class TSA0DScaler(CustomScalerBase):
             self.set_variable_scaling_factor(model.purity, 1e3, overwrite)
 
         if hasattr(model, "recovery"):
-            self.set_variable_scaling_factor(model.recovery, 1e1, overwrite)
+            self.set_variable_scaling_factor(model.recovery, 2e1, overwrite)
 
         if hasattr(model, "productivity"):
             self.set_variable_scaling_factor(model.productivity, 1e-1, overwrite)
@@ -695,14 +695,14 @@ class TSA0DScaler(CustomScalerBase):
         for c in model.purity_eq.values():
             self.scale_constraint_by_nominal_value(
                 c,
-                scheme=ConstraintScalingScheme.inverseRSS,  # gives better jacobian condition number
+                scheme=ConstraintScalingScheme.inverseSum,  # gives better jacobian condition number
                 overwrite=overwrite,
             )
 
         for c in model.recovery_eq.values():
             self.scale_constraint_by_nominal_value(
                 c,
-                scheme=ConstraintScalingScheme.inverseMaximum,
+                scheme=ConstraintScalingScheme.inverseRSS,
                 overwrite=overwrite,
             )
 
@@ -741,13 +741,13 @@ class TSA0DScaler(CustomScalerBase):
             model.flow_mol_in_total, 1e-2, overwrite
         )  # TODO:user SF
         self.set_variable_scaling_factor(
-            model.mole_frac_in["CO2"], 10, overwrite
+            model.mole_frac_in["CO2"], 1e2, overwrite
         )  # TODO:default SF
         self.set_variable_scaling_factor(
             model.mole_frac_in["N2"], 10, overwrite
         )  # TODO:default SF
         self.set_variable_scaling_factor(
-            model.pressure_adsorption, 1e-5, overwrite
+            model.pressure_adsorption, 1e-4, overwrite
         )  # TODO:units SF
         self.set_variable_scaling_factor(
             model.temperature_adsorption, 1e-2, overwrite
