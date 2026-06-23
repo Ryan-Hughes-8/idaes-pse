@@ -1,4 +1,7 @@
+from zmq import has
+
 from idaes.core.scaling import CustomScalerBase, ConstraintScalingScheme
+from pyomo.environ import Constraint
 
 
 class TSA0DScaler(CustomScalerBase):
@@ -19,6 +22,15 @@ class TSA0DScaler(CustomScalerBase):
             model, overwrite, submodel_scalers
         )
         self.performance_variable_scaling_routine(model, overwrite, submodel_scalers)
+        self.design_variable_scaling_routine(model, overwrite, submodel_scalers)
+
+        if hasattr(model, "compressor"):
+            self.call_submodel_scaler_method(
+                submodel=model.compressor.unit,
+                method="variable_scaling_routine",
+                submodel_scalers=submodel_scalers,
+                overwrite=overwrite,
+            )
 
     def constraint_scaling_routine(
         self, model, overwrite: bool = False, submodel_scalers: dict = None
@@ -34,6 +46,23 @@ class TSA0DScaler(CustomScalerBase):
         self.adsorption_step_constraint_scaling_routine(
             model, overwrite, submodel_scalers
         )
+        self.performance_constraint_scaling_routine(model, overwrite, submodel_scalers)
+        self.design_constraint_scaling_routine(model, overwrite, submodel_scalers)
+
+        if hasattr(model, "compressor"):
+            self.call_submodel_scaler_method(
+                submodel=model.compressor.unit,
+                method="constraint_scaling_routine",
+                submodel_scalers=submodel_scalers,
+                overwrite=overwrite,
+            )
+
+        for c in model.component_data_objects(Constraint, descend_into=True):
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
 
     def inlet_port_variable_scaling_routine(
         self, model, overwrite: bool = False, submodel_scalers: dict = None
@@ -42,8 +71,14 @@ class TSA0DScaler(CustomScalerBase):
         if hasattr(model, "flow_mol_in"):
             for t in model.flowsheet().time:
                 for c in model.component_list:
+                    if c == "N2":
+                        sf = 1e-2
+                    elif c == "CO2":
+                        sf = 1e-1
+                    else:
+                        sf = 1
                     self.set_variable_scaling_factor(
-                        model.flow_mol_in[t, c], 1e3, overwrite
+                        model.flow_mol_in[t, c], sf, overwrite
                     )
         if hasattr(model, "temperature_in"):
             for t in model.flowsheet().time:
@@ -89,8 +124,14 @@ class TSA0DScaler(CustomScalerBase):
         if hasattr(model, "flow_mol_co2_rich_stream"):
             for t in model.flowsheet().time:
                 for c in model.isotherm_components:
+                    if c == "CO2":
+                        sf = 1e-1
+                    elif c == "N2":
+                        sf = 1
+                    else:
+                        sf = 1
                     self.set_variable_scaling_factor(
-                        model.flow_mol_co2_rich_stream[t, c], 1e4, overwrite
+                        model.flow_mol_co2_rich_stream[t, c], sf, overwrite
                     )
 
         if hasattr(model, "temperature_co2_rich_stream"):
@@ -105,11 +146,17 @@ class TSA0DScaler(CustomScalerBase):
                     model.pressure_co2_rich_stream[t], 1e-5, overwrite
                 )
 
-        if hasattr(model, "flow_mol_n2_rich_stream"):
+        if hasattr(model, "flow_mol_n2_rich_stream"):  # TODO: default sf
             for t in model.flowsheet().time:
                 for c in model.isotherm_components:
+                    if c == "CO2":
+                        sf = 1e-1
+                    if c == "N2":
+                        sf = 1e-2
+                    else:
+                        sf = 1
                     self.set_variable_scaling_factor(
-                        model.flow_mol_n2_rich_stream[t, c], 1e3, overwrite
+                        model.flow_mol_n2_rich_stream[t, c], sf, overwrite
                     )
 
         if hasattr(model, "temperature_n2_rich_stream"):
@@ -176,6 +223,27 @@ class TSA0DScaler(CustomScalerBase):
                     overwrite=overwrite,
                 )
 
+        for c in model.flow_mol_h2o_o2_stream_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.temperature_h2o_o2_stream_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.pressure_h2o_o2_stream_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
     def heating_step_variable_scaling_routine(
         self, model, overwrite: bool = False, submodel_scalers: dict = None
     ):
@@ -183,11 +251,17 @@ class TSA0DScaler(CustomScalerBase):
         if hasattr(model.heating, "time"):
             self.set_variable_scaling_factor(model.heating.time, 1e-2, overwrite)
 
-        if hasattr(model.heating, "mole_frac"):
+        if hasattr(model.heating, "mole_frac"):  # update N2
             for t in model.heating.time_domain:
                 for c in model.isotherm_components:
+                    if c == "CO2":
+                        sf = 1e1
+                    if c == "N2":
+                        sf = 1e3
+                    else:
+                        sf = 1
                     self.set_variable_scaling_factor(
-                        model.heating.mole_frac[t, c], 1e1, overwrite
+                        model.heating.mole_frac[t, c], sf, overwrite
                     )
 
         if hasattr(model.heating, "temperature"):
@@ -209,6 +283,16 @@ class TSA0DScaler(CustomScalerBase):
                 )
                 self.set_variable_scaling_factor(
                     model.heating.loading[t, "N2"], 1e10, overwrite
+                )
+
+        for t in model.heating.time_domain:
+            for c in model.isotherm_components:
+                if c == "CO2":
+                    sf = 1e2
+                else:
+                    sf = 1e3
+                self.set_variable_scaling_factor(
+                    model.heating.mole_frac_dt[t, c], sf, overwrite
                 )
 
     def heating_step_constraint_scaling_routine(
@@ -319,6 +403,21 @@ class TSA0DScaler(CustomScalerBase):
         if hasattr(model.cooling, "mole_frac_heating_end"):
             self.set_variable_scaling_factor(
                 model.cooling.mole_frac_heating_end, 1e1, overwrite
+            )
+
+        for t in model.cooling.time_domain:
+            for c in model.isotherm_components:
+                if c == "CO2":
+                    sf = 1e1
+                else:
+                    sf = 1e5
+                self.set_variable_scaling_factor(
+                    model.cooling.mole_frac_dt[t, c], sf, overwrite
+                )
+
+        for t in model.cooling.time_domain:
+            self.set_variable_scaling_factor(
+                model.cooling.pressure_dt[t], 1e-4, overwrite
             )
 
     def cooling_step_constraint_scaling_routine(
@@ -562,23 +661,144 @@ class TSA0DScaler(CustomScalerBase):
         self, model, overwrite: bool = False, submodel_scalers: dict = None
     ):
         # Call scaling methods for variables in the performance equations
-        if hasattr(model, "mole_co2_in"):
-            self.set_variable_scaling_factor(model.mole_co2_in, 1e1, overwrite)
+        if hasattr(model, "mole_co2_in"):  # TODO: default sf
+            self.set_variable_scaling_factor(model.mole_co2_in, 1, overwrite)
 
         if hasattr(model, "purity"):
-            self.set_variable_scaling_factor(model.purity, 1e1, overwrite)
+            self.set_variable_scaling_factor(model.purity, 1e3, overwrite)
 
         if hasattr(model, "recovery"):
             self.set_variable_scaling_factor(model.recovery, 1e1, overwrite)
 
         if hasattr(model, "productivity"):
-            self.set_variable_scaling_factor(model.productivity, 1e-2, overwrite)
+            self.set_variable_scaling_factor(model.productivity, 1e-1, overwrite)
 
         if hasattr(model, "cycle_time"):
             self.set_variable_scaling_factor(model.cycle_time, 1e1, overwrite)
 
-        if hasattr(model, "thermal_energy"):
-            self.set_variable_scaling_factor(model.thermal_energy, 1e2, overwrite)
+        if hasattr(model, "thermal_energy"):  # TODO: default sf
+            self.set_variable_scaling_factor(model.thermal_energy, 1, overwrite)
 
         if hasattr(model, "specific_energy"):
-            self.set_variable_scaling_factor(model.specific_energy, 1e-1, overwrite)
+            self.set_variable_scaling_factor(model.specific_energy, 1, overwrite)
+
+    def performance_constraint_scaling_routine(
+        self, model, overwrite: bool = False, submodel_scalers: dict = None
+    ):
+        for c in model.mole_co2_in_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.purity_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseRSS,  # gives better jacobian condition number
+                overwrite=overwrite,
+            )
+
+        for c in model.recovery_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.cycle_time_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.productivity_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.thermal_energy_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.specific_thermal_energy_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+    def design_variable_scaling_routine(
+        self, model, overwrite: bool = False, submodel_scalers: dict = None
+    ):
+        self.set_variable_scaling_factor(
+            model.flow_mol_in_total, 1e-2, overwrite
+        )  # TODO:user SF
+        self.set_variable_scaling_factor(
+            model.mole_frac_in["CO2"], 10, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.mole_frac_in["N2"], 10, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.pressure_adsorption, 1e-5, overwrite
+        )  # TODO:units SF
+        self.set_variable_scaling_factor(
+            model.temperature_adsorption, 1e-2, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.temperature_desorption, 1e-2, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.temperature_heating, 1e-2, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.temperature_cooling, 1e-2, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.bed_diameter, 10, overwrite
+        )  # TODO:user SF
+        self.set_variable_scaling_factor(model.bed_height, 1, overwrite)  # TODO:user SF
+        self.set_variable_scaling_factor(
+            model.pressure_drop, 1e-4, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.velocity_in, 10, overwrite
+        )  # TODO:default SF
+        self.set_variable_scaling_factor(
+            model.velocity_mf, 10, overwrite
+        )  # TODO:default SF
+        for t in model.flowsheet().time:
+            self.set_variable_scaling_factor(
+                model.temperature_h2o_o2_stream[t], 1e-2, overwrite
+            )  # TODO:default SF
+            self.set_variable_scaling_factor(
+                model.pressure_h2o_o2_stream[t], 1e-5, overwrite
+            )  # TODO:default SF
+            for k in ["H2O", "O2"]:
+                self.set_variable_scaling_factor(
+                    model.flow_mol_h2o_o2_stream[t, k], 1, overwrite
+                )  # TODO:default SF, maybe?
+
+    def design_constraint_scaling_routine(
+        self, model, overwrite: bool = False, submodel_scalers: dict = None
+    ):
+        for c in model.velocity_mf_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
+
+        for c in model.pressure_drop_eq.values():
+            self.scale_constraint_by_nominal_value(
+                c,
+                scheme=ConstraintScalingScheme.inverseMaximum,
+                overwrite=overwrite,
+            )
