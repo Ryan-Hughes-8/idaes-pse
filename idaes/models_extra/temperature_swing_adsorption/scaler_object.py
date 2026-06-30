@@ -105,7 +105,7 @@ class TSA0DScaler(CustomScalerBase):
             for c in model.mole_frac_in_eq.values():
                 self.scale_constraint_by_nominal_value(
                     c,
-                    scheme=ConstraintScalingScheme.inverseMaximum,
+                    scheme=ConstraintScalingScheme.inverseSum,  # best jac cond. number
                     overwrite=overwrite,
                 )
 
