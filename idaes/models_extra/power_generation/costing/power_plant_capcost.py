@@ -404,9 +404,15 @@ class QGESSCostingData(FlowsheetCostingBlockData):
                 )
             if tonne_CO2_capture is not None:
                 if not hasattr(self, "tonne_CO2_capture"):
-                    self.tonne_CO2_capture = Param(
-                        initialize=tonne_CO2_capture, mutable=True, units=pyunits.tonne
-                    )
+
+                    @self.Expression()
+                    def tonne_CO2_capture(b):
+                        return tonne_CO2_capture
+
+                    # self.tonne_CO2_capture = Param(
+                    #     initialize=tonne_CO2_capture, mutable=True, units=pyunits.tonne
+                    # )
+
                 self.cost_of_capture = Expression(
                     expr=(
                         (
@@ -414,7 +420,7 @@ class QGESSCostingData(FlowsheetCostingBlockData):
                             + self.total_fixed_OM_cost / pyunits.year
                             + self.total_variable_OM_cost[0] * self.capacity_factor
                         )
-                        / self.tonne_CO2_capture
+                        / (self.tonne_CO2_capture * self.capacity_factor)
                     )
                 )
 
