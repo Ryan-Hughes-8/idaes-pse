@@ -768,9 +768,10 @@ class TSA0DScaler(CustomScalerBase):
         self.set_variable_scaling_factor(
             model.pressure_drop, 1e-4, overwrite
         )  # TODO:default SF
-        self.set_variable_scaling_factor(
-            model.velocity_in, 10, overwrite
-        )  # TODO:default SF
+        if hasattr(model, "velocity_in"):
+            self.set_variable_scaling_factor(
+                model.velocity_in, 10, overwrite
+            )  # TODO:default SF
         self.set_variable_scaling_factor(
             model.velocity_mf, 10, overwrite
         )  # TODO:default SF
