@@ -34,29 +34,47 @@ def add_Langmuir_Freundlich_parameters(blk):
     Method for adding parameters of the Langmuir isotherm model.
     """
 
-    blk.LF_qm = Param(
+    blk.LF_qsat0 = Param(
         blk.isotherm_components,
         initialize={"CO2": 5.0, "N2": 0.0},
         units=units.mol / units.kg,
-        doc="Langmuir-Freundlich saturation capacity",
+        doc="Langmuir-Freundlich saturation capacity reference [mol/kg] or [mmol/g]",
+    )
+    blk.LF_chi = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 2.0, "N2": 0.0},
+        units=units.dimensionless,
+        doc="Langmuir-Freundlich saturation capacity chi",
     )
     blk.LF_b0 = Param(
         blk.isotherm_components,
         initialize={"CO2": 1e-10, "N2": 0.0},
         units=units.Pa**-1,
-        doc="Langmuir-Freundlich b0 (pre-exponential)",
+        doc="Langmuir-Freundlich b0 (pre-exponential) bar^-1",
     )
-    blk.LF_E = Param(
+    blk.LF_dH = Param(
         blk.isotherm_components,
-        initialize={"CO2": -35.0, "N2": 0.0},
-        units=units.kJ / units.mol,
-        doc="Langmuir-Freundlich E",
+        initialize={"CO2": -35.0 * 1e3, "N2": 0.0},
+        units=units.J / units.mol,
+        doc="Langmuir-Freundlich dH [J/mol]",
     )
-    blk.LF_nu = Param(
+    blk.LF_nu0 = Param(
         blk.isotherm_components,
         initialize={"CO2": 0.8, "N2": 0.0},
         units=units.dimensionless,
-        doc="Langmuir-Freundlich nu",
+        doc="Langmuir-Freundlich nu reference",
+    )
+    blk.LF_c = Param(
+        blk.isotherm_components,
+        initialize={"CO2": -0.3, "N2": 0.0},
+        units=units.dimensionless,
+        doc="Langmuir-Freundlich nu c",
+    )
+    blk.LF_T0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 298.15, "N2": 0.0},
+        units=units.K,
+        doc="Langmuir-Freundlich reference T [K]",
     )
 
 
@@ -83,18 +101,11 @@ def Langmuir_Freundlich_isotherm(blk, i, pressure, temperature):
 
     if i == "CO2":
 
-        affinity = blk.LF_b0[i] * exp(
-            units.convert(-blk.LF_E[i], to_units=units.J / units.mol)
-            / const.gas_constant
-            / T
-        )
+        b = blk.LF_b0[i] * exp(-blk.LF_dH[i] / const.gas_constant / T)
+        q_sat = blk.LF_qsat0[i] * exp(blk.LF_chi[i] * (1 - T / blk.LF_T0[i]))
+        nu = blk.LF_nu0[i] + blk.LF_c[i] * (1 - blk.LF_T0[i] / T)
 
-        loading[i] = (
-            blk.LF_qm[i]
-            * affinity
-            * p[i] ** blk.LF_nu[i]
-            / (1 + affinity * p[i] ** blk.LF_nu[i])
-        )
+        loading[i] = q_sat * b * p[i] ** nu / (1 + b * p[i] ** nu)
 
     elif i == "N2":
         # no adsorption is assumed of N2 in this adsorbent
@@ -108,17 +119,17 @@ def add_Henry_parameters(blk):
     Method for adding parameters of the Langmuir isotherm model.
     """
 
-    blk.Henry_b0 = Param(
+    blk.Henry_a0 = Param(
         blk.isotherm_components,
-        initialize={"CO2": 1e-10, "N2": 0.0},
-        units=units.Pa**-1,
-        doc="Henry b0 (pre-exponential)",
+        initialize={"CO2": 4.57e-9, "N2": 0.0},
+        units=units.mmol / units.g / units.Pa,
+        doc="Henry b0 (pre-exponential) [mmol/g/bar] or [mol/kg/bar]",
     )
-    blk.Henry_E = Param(
+    blk.Henry_dH = Param(
         blk.isotherm_components,
-        initialize={"CO2": -35.0, "N2": 0.0},
-        units=units.kJ / units.mol,
-        doc="Henry E",
+        initialize={"CO2": -2.12e4, "N2": 0.0},
+        units=units.J / units.mol,
+        doc="Henry dh [J/mol]",
     )
 
 
@@ -145,13 +156,9 @@ def Henry_isotherm(blk, i, pressure, temperature):
 
     if i == "CO2":
 
-        affinity = blk.Henry_b0[i] * exp(
-            units.convert(-blk.Henry_E[i], to_units=units.J / units.mol)
-            / const.gas_constant
-            / T
-        )
+        a = blk.Henry_a0[i] * exp(-blk.Henry_dH[i] / const.gas_constant / T)
 
-        loading[i] = affinity * p[i]
+        loading[i] = a * p[i]
 
     elif i == "N2":
         # no adsorption is assumed of N2 in this adsorbent
@@ -165,11 +172,11 @@ def add_Langmuir_parameters(blk):
     Method for adding parameters of the Langmuir isotherm model.
     """
 
-    blk.Langmuir_qm = Param(
+    blk.Langmuir_q_sat0 = Param(
         blk.isotherm_components,
         initialize={"CO2": 3.0, "N2": 0.0},
         units=units.mol / units.kg,
-        doc="Langmuir saturation capacity",
+        doc="Langmuir saturation capacity [mol/kg] or [mmol/g]",
     )
     blk.Langmuir_b0 = Param(
         blk.isotherm_components,
@@ -177,11 +184,23 @@ def add_Langmuir_parameters(blk):
         units=units.Pa**-1,
         doc="Langmuir b0 (pre-exponential)",
     )
-    blk.Langmuir_E = Param(
+    blk.Langmuir_dH = Param(
         blk.isotherm_components,
-        initialize={"CO2": -35.0, "N2": 0.0},
-        units=units.kJ / units.mol,
+        initialize={"CO2": -3.5e4, "N2": 0.0},
+        units=units.J / units.mol,
         doc="Langmuir E",
+    )
+    blk.Langmuir_chi = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 0.69, "N2": 0.0},
+        units=units.dimensionless,
+        doc="Langmuir chi",
+    )
+    blk.Langmuir_T0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 269.3, "N2": 298},
+        units=units.K,
+        doc="Langmuir reference T",
     )
 
 
@@ -203,18 +222,16 @@ def Langmuir_isotherm(blk, i, pressure, temperature):
     p = {}
     loading = {}
 
-    for j in blk.isotherm_components:
-        p[j] = units.convert(pressure[j], to_units=units.Pa)
-
     if i == "CO2":
 
-        affinity = blk.Langmuir_b0[i] * exp(
-            units.convert(-blk.Langmuir_E[i], to_units=units.J / units.mol)
-            / const.gas_constant
-            / T
+        p = units.convert(pressure[i], to_units=units.Pa)
+
+        b = blk.Langmuir_b0[i] * exp(-blk.Langmuir_dH[i] / const.gas_constant / T)
+        q = blk.Langmuir_q_sat0[i] * exp(
+            blk.Langmuir_chi[i] * (1 - T / blk.Langmuir_T0[i])
         )
 
-        loading[i] = blk.Langmuir_qm[i] * affinity * p[i] / (1 + affinity * p[i])
+        loading[i] = q * b * p / (1 + b * p)
 
     elif i == "N2":
         # no adsorption is assumed of N2 in this adsorbent
@@ -454,6 +471,82 @@ def extended_Sips_isotherm(blk, i, pressure, temperature):
     return loading[i]
 
 
+def add_Sips_parameters(blk):
+    """
+    Method to add sips isotherm parameters. CO2 and N2 are adsorbed.
+
+    """
+
+    blk.Sips_T0 = Param(
+        blk.isotherm_components,
+        initialize=298.15,
+        units=units.K,
+        doc="Reference temperature",
+    )
+    blk.Sips_qsat0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 12.76, "N2": 0},
+        units=units.mol / units.kg,
+        doc="Sips reference capacity [mol/kg]",
+    )
+    blk.Sips_chi = Param(
+        blk.isotherm_components,
+        initialize={"CO2": -0.1994, "N2": 0.0},
+        units=units.dimensionless,
+        doc="Sips chi",
+    )
+    blk.Sips_b0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 3.396e-10, "N2": 0},
+        units=units.Pa**-1,
+        doc="Sips b0 [Pa^-1]",
+    )
+    blk.Sips_dH = Param(
+        blk.isotherm_components,
+        initialize={"CO2": -2.358e4, "N2": 0},
+        units=units.J / units.mol,
+        doc="Sips energy [J/mol]",
+    )
+    blk.Sips_nu0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 0.9357, "N2": 0},
+        units=units.dimensionless,
+        doc="Sips nu reference",
+    )
+    blk.Sips_c = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 0.1314, "N2": 0.0},
+        units=units.dimensionless,
+        doc="Sips parameter c",
+    )
+
+
+def Sips_isotherm(blk, i, pressure, temperature):
+    """
+    Method to add isotherm for components.
+    Isotherm equation: Extended Sips
+
+    Keyword Arguments:
+        i : component
+        pressure : partial pressure of components
+        temperature : temperature
+
+    """
+    T = temperature
+
+    if i == "CO2":
+        p = units.convert(pressure[i], to_units=units.Pa)
+        b = blk.Sips_b0[i] * exp(-blk.Sips_dH[i] / const.gas_constant / T)
+        q_sat = blk.Sips_qsat0[i] * exp(blk.Sips_chi[i] * (1 - T / blk.Sips_T0[i]))
+        nu = blk.Sips_nu0[i] + blk.Sips_c[i] * (1 - blk.Sips_T0[i] / T)
+
+        b_p = b * p
+        loading = q_sat * b_p ** (1 / nu) / (1 + b_p ** (1 / nu))
+        return loading
+    elif i == "N2":
+        return 1e-10 * units.mol / units.kg
+
+
 def add_weighted_DSL_parameters(blk):
     """
     Method to add isotherm parameters for the weighed dual-site
@@ -666,46 +759,47 @@ def add_Toth_parameters(blk):
 
     """
 
-    blk.temperature_ref = Param(
-        initialize=298.15,
+    blk.Toth_T0 = Param(
+        blk.isotherm_components,
+        initialize={"CO2": 298.15, "N2": 298.15},
         units=units.K,
-        doc="Reference temperature",
+        doc="Toth Reference temperature [K]",
     )
-    blk.saturation_capacity_ref = Param(
+    blk.Toth_q_sat0 = Param(
         blk.isotherm_components,
         initialize={"CO2": 1.71, "N2": 0.0},
         units=units.mol / units.kg,
-        doc="Saturation capacity at reference temperature",
+        doc="Toth saturation capacity at reference temperature [mol/kg] or [mmol/g]",
     )
-    blk.affinity_preexponential_factor = Param(
+    blk.Toth_b0 = Param(
         blk.isotherm_components,
-        initialize={"CO2": 1.13e5, "N2": 0.0},
-        units=units.bar**-1,
-        doc="Pre-exponential factor for the affinity parameter",
+        initialize={"CO2": 1e-10, "N2": 0.0},
+        units=units.Pa**-1,
+        doc="Toth pre-exponential factor for the affinity parameter [Pa^-1]",
     )
-    blk.toth_constant_ref = Param(
+    blk.Toth_nu0 = Param(
         blk.isotherm_components,
-        initialize={"CO2": 0.265, "N2": 0.0},
+        initialize={"CO2": 0.75, "N2": 0.0},
         units=units.dimensionless,
         doc="Toth constant at reference temperature",
     )
-    blk.toth_constant_alpha = Param(
+    blk.Toth_c = Param(
         blk.isotherm_components,
         initialize={"CO2": 0.601, "N2": 0.0},
         units=units.dimensionless,
-        doc="Isotherm parameter",
+        doc="Toth nu temperature dependant parameter",
     )
-    blk.saturation_capacity_exponential_factor = Param(
+    blk.Toth_chi = Param(
         blk.isotherm_components,
         initialize={"CO2": 4.53, "N2": 0.0},
         units=units.dimensionless,
         doc="Exponential factor for saturation capacity",
     )
-    blk.affinity_characteristic_energy = Param(
+    blk.Toth_dH = Param(
         blk.isotherm_components,
-        initialize={"CO2": 62.2, "N2": 0.0},
-        units=units.kJ / units.mol,
-        doc="Characteristic energy for the affinity parameter",
+        initialize={"CO2": -4.5e4, "N2": 0.0},
+        units=units.J / units.mol,
+        doc="Toth dH [J/mol]",
     )
 
 
@@ -735,28 +829,11 @@ def Toth_isotherm(blk, i, pressure, temperature):
 
     if i == "CO2":
 
-        saturation_capacity = blk.saturation_capacity_ref[i] * exp(
-            blk.saturation_capacity_exponential_factor[i]
-            * (1 - T / blk.temperature_ref)
-        )
-        affinity = blk.affinity_preexponential_factor[i] * exp(
-            units.convert(
-                blk.affinity_characteristic_energy[i], to_units=units.J / units.mol
-            )
-            / const.gas_constant
-            / blk.temperature_ref
-            * (blk.temperature_ref / T - 1)
-        )
-        toth_constant = blk.toth_constant_ref[i] + blk.toth_constant_alpha[i] * (
-            1 - blk.temperature_ref / T
-        )
+        q_sat = blk.Toth_q_sat0[i] * exp(blk.Toth_chi[i] * (1 - T / blk.Toth_T0[i]))
+        b = blk.Toth_b0[i] * exp(-blk.Toth_dH[i] / const.gas_constant / T)
+        nu = blk.Toth_nu0[i] + blk.Toth_c[i] * (1 - blk.Toth_T0[i] / T)
 
-        loading[i] = (
-            saturation_capacity
-            * affinity
-            * p[i]
-            / (1 + (affinity * p[i]) ** toth_constant) ** (1 / toth_constant)
-        )
+        loading[i] = q_sat * b * p[i] / (1 + (b * p[i]) ** nu) ** (1 / nu)
 
     elif i == "N2":
         # no adsorption is assumed of N2 in this adsorbent
