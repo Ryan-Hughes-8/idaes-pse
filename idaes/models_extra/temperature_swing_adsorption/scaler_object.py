@@ -1,7 +1,7 @@
 from zmq import has
 
 from idaes.core.scaling import CustomScalerBase, ConstraintScalingScheme
-from pyomo.environ import Constraint
+from pyomo.environ import Constraint, is_variable_type
 
 
 class TSA0DScaler(CustomScalerBase):
@@ -768,7 +768,7 @@ class TSA0DScaler(CustomScalerBase):
         self.set_variable_scaling_factor(
             model.pressure_drop, 1e-4, overwrite
         )  # TODO:default SF
-        if hasattr(model, "velocity_in"):
+        if is_variable_type(model.velocity_in):
             self.set_variable_scaling_factor(
                 model.velocity_in, 10, overwrite
             )  # TODO:default SF
