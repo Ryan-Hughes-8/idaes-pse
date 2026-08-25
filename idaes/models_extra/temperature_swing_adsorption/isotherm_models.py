@@ -825,7 +825,7 @@ def Toth_isotherm(blk, i, pressure, temperature):
     loading = {}
 
     for j in blk.isotherm_components:
-        p[j] = units.convert(pressure[j], to_units=units.bar)
+        p[j] = units.convert(pressure[j], to_units=units.Pa)
 
     if i == "CO2":
 
