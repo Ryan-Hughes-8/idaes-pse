@@ -117,6 +117,7 @@ class IsothermModel(Enum):
     Toth = 5
     Henry = 6
     Langmuir_Freundlich = 7
+    Sips = 8
 
 
 class SteamCalculationType(Enum):
@@ -178,7 +179,8 @@ model must be specified when custom sorbent is declared.
 - IsothermModel.extended_Sips
 - IsothermModel.Toth
 - IsothermModel.Henry
-- IsothermModel.Langmuir_Freundlich""",
+- IsothermModel.Langmuir_Freundlich
+- IsothermModel.Sips""",
         ),
     )
     CONFIG.declare(
@@ -424,6 +426,8 @@ The property package must be iapws95.
                 add_Henry_parameters(blk=self)
             elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
                 add_Langmuir_Freundlich_parameters(blk=self)
+            elif self.config.isotherm_model == IsothermModel.Sips:
+                add_Sips_parameters(blk=self)
 
         # add design and operating variables
         self.flow_mol_in_total = Var(
@@ -1980,6 +1984,7 @@ The property package must be iapws95.
         )
         self.adsorption.loading = Var(
             self.isotherm_components,
+            initialize=1 * units.mol / units.kg,
             units=units.mol / units.kg,
             doc="Equilibrium loading in adsorption step",
         )
@@ -2055,7 +2060,8 @@ The property package must be iapws95.
         # adsorption time
         @self.adsorption.Constraint(doc="Equation for adsorption time")
         def adsorption_time_eq(b):
-            return self.bed_height / b.ads_prop_vel == b.time
+            # return self.bed_height / b.ads_prop_vel == b.time
+            return self.bed_height == b.time * b.ads_prop_vel
 
         # auxiliary constraints to connect initial state of adsorption step
         # with final state of pressurization step
@@ -2167,6 +2173,8 @@ The property package must be iapws95.
                 return Henry_isotherm(self, i, pressure, temperature)
             elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
                 return Langmuir_Freundlich_isotherm(self, i, pressure, temperature)
+            elif self.config.isotherm_model == IsothermModel.Sips:
+                return Sips_isotherm(self, i, pressure, temperature)
 
     # TODO: develop a property package framework for adsorbents
     def _isotherm_zeolite_13x(self, i, pressure, temperature):
