@@ -425,13 +425,24 @@ def get_dac_costing(unit, costing_case):
         },
     )
 
+    # parallelizing beds ====================================================================
+    # target cross sectional area: 113 ft^2, same as Sorbent report
+    CSA_vessel_ft2 = units.convert(unit.bed_area, to_units=units.ft**2)
+    vessel_ratio = CSA_vessel_ft2 / 113 * units.ft**2
+    unit.bed_volume_costing = (
+        113 * units.ft**2 * units.convert(unit.bed_height, to_units=units.ft)
+    )
+    unit.number_beds_costing = unit.number_beds * vessel_ratio
+    # =======================================================================================
+
     fs.vessels = UnitModelBlock()
     fs.vessels.costing = UnitModelCostingBlock(
         flowsheet_costing_block=fs.costing,
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.1"],
-            "scaled_param": units.convert(unit.bed_volume, to_units=units.ft**3),
+            # "scaled_param": units.convert(unit.bed_volume, to_units=units.ft**3),
+            "scaled_param": unit.bed_volume_costing,  # for parallelized config
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -545,7 +556,10 @@ def get_dac_costing(unit, costing_case):
         costing_method=QGESSCostingData.get_PP_costing,
         costing_method_arguments={
             "cost_accounts": ["15.10"],
-            "scaled_param": CO2_storage_throughput,
+            # "scaled_param": CO2_storage_throughput,
+            "scaled_param": 8207
+            * units.m**3
+            / units.hr,  # fixed value from sorbent report
             "tech": 8,
             "ccs": "B",
             "additional_costing_params": costing_params,
@@ -575,9 +589,15 @@ def get_dac_costing(unit, costing_case):
                 if k not in ["15.1", "15.4", "15.5"]:
                     TPC_list[k] = o.costing.total_plant_cost[k]
                 if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds
+                    # TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds
+                    TPC_list[k] = (
+                        o.costing.total_plant_cost[k] * unit.number_beds_costing
+                    )
                 if k in ["15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
+                    # TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
+                    TPC_list[k] = (
+                        o.costing.total_plant_cost[k] * unit.number_beds_costing / 2
+                    )
 
     # Total plant cost of dac unit
     @fs.costing.Expression(doc="total TPC for TSA system in $MM")
@@ -678,8 +698,11 @@ def get_dac_costing(unit, costing_case):
 
     @fs.costing.Expression()
     def land_cost_exp(b):
+        # return (
+        #     156000 * (unit.number_beds / 120) ** (0.78)
+        # ) * 1e-6  # scaled to Millions
         return (
-            156000 * (unit.number_beds / 120) ** (0.78)
+            156000 * (unit.number_beds_costing / 120) ** (0.78)
         ) * 1e-6  # scaled to Millions
 
     fs.costing.build_process_costs(
@@ -717,9 +740,15 @@ def print_dac_costing(unit):
                 if k not in ["15.1", "15.4", "15.5"]:
                     TPC_list[k] = o.costing.total_plant_cost[k]
                 if k in ["15.1"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds
+                    # TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds
+                    TPC_list[k] = (
+                        o.costing.total_plant_cost[k] * unit.number_beds_costing
+                    )
                 if k in ["15.4", "15.5"]:
-                    TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
+                    # TPC_list[k] = o.costing.total_plant_cost[k] * unit.number_beds / 2
+                    TPC_list[k] = (
+                        o.costing.total_plant_cost[k] * unit.number_beds_costing / 2
+                    )
 
     for i, k in TPC_list.items():
         print(i, value(k))
