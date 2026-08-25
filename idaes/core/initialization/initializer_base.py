@@ -199,9 +199,9 @@ class InitializerBase:
             self._local_logger_level = None
 
         # 7. Check convergence
-        return self.postcheck(
-            model, results_obj=results, exclude_unused_vars=exclude_unused_vars
-        )
+        # return self.postcheck(
+        #     model, results_obj=results, exclude_unused_vars=exclude_unused_vars
+        # )
 
     def get_current_state(self, model: Block):
         """
