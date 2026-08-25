@@ -63,6 +63,7 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
         exclude_unused_vars: bool = True,
         heating_time_guess=1000,
         cooling_time_guess=500,
+        max_iterations=25,
     ):
 
         if not exclude_unused_vars:
@@ -76,6 +77,7 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
 
         self.heating_time_guess = heating_time_guess
         self.cooling_time_guess = cooling_time_guess
+        self.max_iterations = max_iterations
 
         super().initialize(
             model=model,
@@ -143,6 +145,7 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
                 blk,
                 cycle_step=blk.heating,
                 t_guess=self.heating_time_guess,
+                max_iterations=self.max_iterations,
             )
         else:
             raise InitializationError(
@@ -189,6 +192,7 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
                 blk,
                 cycle_step=blk.cooling,
                 t_guess=self.cooling_time_guess,
+                max_iterations=self.max_iterations,
             )
         else:
             raise InitializationError(
@@ -699,7 +703,9 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
                 + " step Failed {}.".format(cycle_step.name)
             )
 
-    def _false_position_method(self, blk, cycle_step=None, t_guess=None):
+    def _false_position_method(
+        self, blk, cycle_step=None, t_guess=None, max_iterations=100
+    ):
         """
         False position method to provide initial solution for TSA cycle steps.
 
@@ -823,6 +829,9 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
                     x0 = x_new
                     f_x0 = f_x_new
 
+            if count >= max_iterations:
+                condition = False
+
         # implementing false position method
         init_log.info_high(
             "Initialization of "
@@ -880,6 +889,9 @@ class FixedBedTSA0DInitializer(ModularInitializerBase):
             # update counter and set up new condition |f(x_2)| > error
             count += 1
             condition = (f_x2**2) ** 0.5 > 1
+
+            if count >= max_iterations:
+                condition = False
 
     def _calculate_and_fix_variable_from_constraint(
         self, obj, variable_list=None, constraint_list=None
