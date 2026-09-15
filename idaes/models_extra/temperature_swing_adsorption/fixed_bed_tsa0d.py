@@ -50,7 +50,7 @@ from pandas import DataFrame
 
 # Import Pyomo libraries
 from pyomo.network import Port
-from pyomo.common.config import ConfigValue, In, Bool
+from pyomo.common.config import ConfigValue, In, Bool, IsInstance
 from pyomo.environ import (
     Constraint,
     Var,
@@ -104,22 +104,6 @@ class Adsorbent(Enum):
     custom = 5
 
 
-class IsothermModel(Enum):
-    """
-    Enum for supported isotherm models to use with custom adsorbent
-    """
-
-    none = 0
-    Langmuir = 1
-    dual_site_Langmuir = 2
-    weighted_DSL = 3
-    extended_Sips = 4
-    Toth = 5
-    Henry = 6
-    Langmuir_Freundlich = 7
-    Sips = 8
-
-
 class SteamCalculationType(Enum):
     """
     Enum for steam calculation types.
@@ -164,23 +148,15 @@ class FixedBedTSA0DData(UnitModelBlockData):
         ),
     )
     CONFIG.declare(
-        "isotherm_model",
+        "isotherm_models",
         ConfigValue(
-            default=IsothermModel.none,
-            domain=In(IsothermModel),
-            description="Isotherm model flag to use with custom adsorbent",
-            doc="""Flag to set adsorbent isotherm model for custom adsorbent.
+            default=None,
+            domain=IsInstance(type(None), dict),
+            description="Isotherm model dict to use with custom adsorbent",
+            doc="""dict to set adsorbent isotherm model for custom adsorbent.
 Default value is none which will throw an exception when called, an actual 
-model must be specified when custom sorbent is declared.
-- IsothermModel.none (default)
-- IsothermModel.Langmuir
-- IsothermModel.dual_site_Langmuir
-- IsothermModel.weighted_DSL
-- IsothermModel.extended_Sips
-- IsothermModel.Toth
-- IsothermModel.Henry
-- IsothermModel.Langmuir_Freundlich
-- IsothermModel.Sips""",
+model must be specified when custom sorbent is declared. Keys must be in isotherm_components set and values must be with the IsothermModel class.
+- None (default)""",
         ),
     )
     CONFIG.declare(
@@ -375,7 +351,7 @@ The property package must be iapws95.
         # consistency check for adsorbent and isotherm model config options
         if (
             self.config.adsorbent == Adsorbent.custom
-            and self.config.isotherm_model == IsothermModel.none
+            and self.config.isotherm_models == None
         ):
             raise ConfigurationError(
                 "{} was not provided an isotherm model to use with the custom adsorbent. Please provide a valid model using the IsothermModel class.".format(
@@ -385,7 +361,7 @@ The property package must be iapws95.
 
         if (
             self.config.adsorbent != Adsorbent.custom
-            and self.config.isotherm_model != IsothermModel.none
+            and self.config.isotherm_models != None
         ):
             _log.warning(
                 "An isotherm model was specified for a named adsorbent. The specified isotherm model will be ignored and the "
@@ -412,22 +388,7 @@ The property package must be iapws95.
             self._add_parameters_calf_20()
         elif self.config.adsorbent == Adsorbent.custom:
             self._add_parameters_custom()
-            if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                add_dual_site_Langmuir_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.extended_Sips:
-                add_extended_Sips_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.weighted_DSL:
-                add_weighted_DSL_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Toth:
-                add_Toth_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Langmuir:
-                add_Langmuir_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Henry:
-                add_Henry_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
-                add_Langmuir_Freundlich_parameters(blk=self)
-            elif self.config.isotherm_model == IsothermModel.Sips:
-                add_Sips_parameters(blk=self)
+            add_parameters_custom_isotherm(blk=self)
 
         # add design and operating variables
         self.flow_mol_in_total = Var(
@@ -2158,23 +2119,7 @@ The property package must be iapws95.
             return self._isotherm_calf_20(i, pressure, temperature)
 
         elif self.config.adsorbent == Adsorbent.custom:
-
-            if self.config.isotherm_model == IsothermModel.dual_site_Langmuir:
-                return dual_site_Langmuir_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.extended_Sips:
-                return extended_Sips_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.weighted_DSL:
-                return weighted_DSL_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Toth:
-                return Toth_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Langmuir:
-                return Langmuir_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Henry:
-                return Henry_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Langmuir_Freundlich:
-                return Langmuir_Freundlich_isotherm(self, i, pressure, temperature)
-            elif self.config.isotherm_model == IsothermModel.Sips:
-                return Sips_isotherm(self, i, pressure, temperature)
+            return custom_isotherm(self, i, pressure, temperature)
 
     # TODO: develop a property package framework for adsorbents
     def _isotherm_zeolite_13x(self, i, pressure, temperature):
