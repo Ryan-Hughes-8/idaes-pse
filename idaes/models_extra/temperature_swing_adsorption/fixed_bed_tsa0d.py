@@ -60,7 +60,6 @@ from pyomo.environ import (
     exp,
     log,
     PositiveReals,
-    NonPositiveReals,
     TransformationFactory,
     units,
     Block,
@@ -446,9 +445,13 @@ The property package must be iapws95.
             units=units.m,
             doc="Column length",
         )
+        # It would be better to name this variable
+        # "pressure_change". Having the "pressure_drop"
+        # be negative makes it seem like pressure
+        # increases across the column
         self.pressure_drop = Var(
             initialize=-3500,
-            domain=NonPositiveReals,
+            bounds=(None, 0),
             units=units.Pa,
             doc="Pressure drop in the column",
         )
