@@ -625,7 +625,7 @@ def get_dac_costing(unit, costing_case):
     fs.costing.net_power = Var(fs.time, initialize=690, units=units.MW)
     fs.costing.net_power.fix()
 
-    # resorces to be costed
+    # resources to be costed
     resources = [
         "water",
         "water_treatment_chemicals",
