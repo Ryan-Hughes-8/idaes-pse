@@ -34,6 +34,7 @@ from idaes.models_extra.temperature_swing_adsorption.costing.dac_costing import 
     get_dac_costing,
     print_dac_costing,
     dac_costing_summary,
+    get_dac_costing_data,
 )
 from idaes.core.util.model_statistics import (
     degrees_of_freedom,
@@ -43,10 +44,30 @@ from idaes.core.util.model_statistics import (
 )
 from idaes.core.solvers import get_solver
 import idaes.core.util.scaling as iscale
+from idaes.core.util.exceptions import ConfigurationError
 
 # -----------------------------------------------------------------------------
 # Get default solver for testing
 solver = get_solver()
+
+
+@pytest.mark.unit
+class TestCostingCaseConfigs:
+    def test_get_dac_costing_data_invalid_case(self):
+        with pytest.raises(ConfigurationError, match="costing case not defined"):
+            get_dac_costing_data("not_a_valid_case")
+
+    def test_get_dac_costing_data_electric_boiler(self):
+        data = get_dac_costing_data("electric_boiler")
+
+        assert isinstance(data, dict)
+        assert len(data) > 0
+
+    def test_get_dac_costing_data_retrofit_ngcc(self):
+        data = get_dac_costing_data("retrofit_ngcc")
+
+        assert isinstance(data, dict)
+        assert len(data) > 0
 
 
 @pytest.mark.integration
@@ -107,6 +128,120 @@ class TestElectricBoilerCosting:
         assert number_variables(model) == 3008
         assert number_total_constraints(model) == 2977
         assert number_unused_variables(model) == 12
+
+    @pytest.mark.solver
+    @pytest.mark.skipif(solver is None, reason="Solver not available")
+    def test_EB_cost_accounts(self, model):
+        assert model.fs.raw_water_system.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["3.2", "3.4", "9.5", "14.6"]
+
+        assert model.fs.steam_system.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["3.1", "3.3", "3.5"]
+
+        assert model.fs.cooling_tower.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["9.1"]
+
+        assert model.fs.water_discharge_system.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["3.7"]
+
+        assert model.fs.cooling_water_system.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["9.2", "9.3", "9.4", "9.6", "9.7", "14.5"]
+
+        assert model.fs.electric_systems.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == [
+            "11.1",
+            "11.2",
+            "11.3",
+            "11.4",
+            "11.5",
+            "11.6",
+            "11.7",
+            "11.8",
+            "11.9",
+            "12.4",
+            "12.5",
+            "12.6",
+            "12.7",
+            "12.8",
+            "12.9",
+            "13.1",
+            "13.2",
+            "13.3",
+            "14.4",
+            "14.7",
+            "14.8",
+            "14.9",
+            "14.10",
+        ]
+
+        assert model.fs.electric_boiler.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.9"]
+
+    @pytest.mark.solver
+    @pytest.mark.skipif(solver is None, reason="Solver not available")
+    def test_shared_DAC_cost_accounts(self, model):
+        assert model.fs.sorbent_makeup.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == [
+            "1.5",
+            "1.6",
+            "1.7",
+            "1.8",
+            "1.9",
+            "2.5",
+            "2.6",
+            "2.9",
+            "10.6",
+            "10.7",
+            "10.9",
+        ]
+
+        assert model.fs.vessels.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.1"]
+
+        assert model.fs.product_compression.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.2"]
+
+        assert model.fs.compressor_aftercooler.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.3"]
+
+        assert model.fs.duct_dampers.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.4"]
+
+        assert model.fs.feed_fans.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.5"]
+
+        assert model.fs.desorption_gas_handling.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.6"]
+
+        assert model.fs.steam_distribution.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.7"]
+
+        assert model.fs.controls_equipment.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.8"]
+
+        assert model.fs.CO2_storage_vessel.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.10"]
+
+        assert model.fs.CO2_dryer.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["15.11"]
 
     @pytest.mark.solver
     @pytest.mark.skipif(solver is None, reason="Solver not available")
@@ -203,6 +338,36 @@ class TestRetrofitNgccCosting:
         assert number_variables(model) == 2962
         assert number_total_constraints(model) == 2931
         assert number_unused_variables(model) == 12
+
+    @pytest.mark.solver
+    @pytest.mark.skipif(solver is None, reason="Solver not available")
+    def test_Ngcc_cost_accounts(self, model):
+        assert model.fs.gas_flow_to_dac.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["7.3"]
+
+        assert model.fs.steam_flow_system.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == ["8.4"]
+
+        assert model.fs.electric_systems.costing.config.costing_method_arguments[
+            "cost_accounts"
+        ] == [
+            "11.2",
+            "11.3",
+            "11.4",
+            "11.5",
+            "11.6",
+            "12.1",
+            "12.2",
+            "12.3",
+            "12.4",
+            "12.5",
+            "12.6",
+            "12.7",
+            "12.8",
+            "12.9",
+        ]
 
     @pytest.mark.solver
     @pytest.mark.skipif(solver is None, reason="Solver not available")
