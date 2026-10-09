@@ -187,8 +187,8 @@ def get_dac_costing(unit, costing_case):
             units.kW,
         )
 
-        unit.raw_water_system = UnitModelBlock()
-        unit.raw_water_system.costing = UnitModelCostingBlock(
+        fs.raw_water_system = UnitModelBlock()
+        fs.raw_water_system.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -200,8 +200,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.steam_system = UnitModelBlock()
-        unit.steam_system.costing = UnitModelCostingBlock(
+        fs.steam_system = UnitModelBlock()
+        fs.steam_system.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -215,8 +215,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.cooling_tower = UnitModelBlock()
-        unit.cooling_tower.costing = UnitModelCostingBlock(
+        fs.cooling_tower = UnitModelBlock()
+        fs.cooling_tower.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -228,8 +228,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.water_discharge_system = UnitModelBlock()
-        unit.water_discharge_system.costing = UnitModelCostingBlock(
+        fs.water_discharge_system = UnitModelBlock()
+        fs.water_discharge_system.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -241,8 +241,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.cooling_water_system = UnitModelBlock()
-        unit.cooling_water_system.costing = UnitModelCostingBlock(
+        fs.cooling_water_system = UnitModelBlock()
+        fs.cooling_water_system.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -254,8 +254,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.electric_systems = UnitModelBlock()
-        unit.electric_systems.costing = UnitModelCostingBlock(
+        fs.electric_systems = UnitModelBlock()
+        fs.electric_systems.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -292,8 +292,8 @@ def get_dac_costing(unit, costing_case):
         )
 
         # Electric Boiler 15.9
-        unit.electric_boiler = UnitModelBlock()
-        unit.electric_boiler.costing = UnitModelCostingBlock(
+        fs.electric_boiler = UnitModelBlock()
+        fs.electric_boiler.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -331,8 +331,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.steam_flow_system = UnitModelBlock()
-        unit.steam_flow_system.costing = UnitModelCostingBlock(
+        fs.steam_flow_system = UnitModelBlock()
+        fs.steam_flow_system.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
@@ -346,8 +346,8 @@ def get_dac_costing(unit, costing_case):
             },
         )
 
-        unit.electric_systems = UnitModelBlock()
-        unit.electric_systems.costing = UnitModelCostingBlock(
+        fs.electric_systems = UnitModelBlock()
+        fs.electric_systems.costing = UnitModelCostingBlock(
             flowsheet_costing_block=fs.costing,
             costing_method=QGESSCostingData.get_PP_costing,
             costing_method_arguments={
