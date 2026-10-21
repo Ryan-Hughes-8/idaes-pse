@@ -13,6 +13,7 @@
 """
 IDAES model for a generic multiple-stream contactor unit.
 """
+
 from functools import partial
 
 from pandas import DataFrame
@@ -123,8 +124,10 @@ class MSContactorScaler(CustomScalerBase):
             for p, j in pc_set:
                 # Scale the reaction generation term to be
                 # the same magnitude as the material flow term
-                nom = self.get_expression_nominal_value(
-                    stream_state[t, e].get_material_flow_terms(p, j)
+                nom = abs(
+                    self.get_expression_nominal_value(
+                        stream_state[t, e].get_material_flow_terms(p, j)
+                    )
                 )
                 self.set_variable_scaling_factor(
                     rxn_gen[t, e, p, j], 1 / nom, overwrite=overwrite
@@ -303,17 +306,23 @@ class MSContactorScaler(CustomScalerBase):
                         # Determine the precision at which each stream
                         # is tracking comp in its material balances
                         nom1 = self.get_expression_nominal_value(
-                            sum(
-                                stream_state1[t, e].get_material_flow_terms(p, comp)
-                                for p in stream_state1[t, e].phase_list
-                                if (p, comp) in stream_state1[t, e].phase_component_set
+                            abs(
+                                sum(
+                                    stream_state1[t, e].get_material_flow_terms(p, comp)
+                                    for p in stream_state1[t, e].phase_list
+                                    if (p, comp)
+                                    in stream_state1[t, e].phase_component_set
+                                )
                             )
                         )
                         nom2 = self.get_expression_nominal_value(
-                            sum(
-                                stream_state2[t, e].get_material_flow_terms(p, comp)
-                                for p in stream_state2[t, e].phase_list
-                                if (p, comp) in stream_state2[t, e].phase_component_set
+                            abs(
+                                sum(
+                                    stream_state2[t, e].get_material_flow_terms(p, comp)
+                                    for p in stream_state2[t, e].phase_list
+                                    if (p, comp)
+                                    in stream_state2[t, e].phase_component_set
+                                )
                             )
                         )
                         # Scale the material transfer term at the same
@@ -340,8 +349,10 @@ class MSContactorScaler(CustomScalerBase):
                         for p, j in pc_set:
                             # Scale the heterogeneous reaction term to be
                             # the same magnitude as the material flow term
-                            nom = self.get_expression_nominal_value(
-                                stream_state[t, e].get_material_flow_terms(p, j)
+                            nom = abs(
+                                self.get_expression_nominal_value(
+                                    stream_state[t, e].get_material_flow_terms(p, j)
+                                )
                             )
                             self.set_variable_scaling_factor(
                                 het_rxn_gen[t, e, p, j], 1 / nom, overwrite=overwrite
@@ -424,19 +435,23 @@ class MSContactorScaler(CustomScalerBase):
                 for t in model.flowsheet().time:
                     for e in model.elements:
                         if model.config.streams[stream1].has_energy_balance:
-                            nom1 = self.get_expression_nominal_value(
-                                sum(
-                                    stream_state1[t, e].get_enthalpy_flow_terms(p)
-                                    for p in stream_state1[t, e].phase_list
+                            nom1 = abs(
+                                self.get_expression_nominal_value(
+                                    sum(
+                                        stream_state1[t, e].get_enthalpy_flow_terms(p)
+                                        for p in stream_state1[t, e].phase_list
+                                    )
                                 )
                             )
                         else:
                             nom1 = None
                         if model.config.streams[stream2].has_energy_balance:
-                            nom2 = self.get_expression_nominal_value(
-                                sum(
-                                    stream_state2[t, e].get_enthalpy_flow_terms(p)
-                                    for p in stream_state2[t, e].phase_list
+                            nom2 = abs(
+                                self.get_expression_nominal_value(
+                                    sum(
+                                        stream_state2[t, e].get_enthalpy_flow_terms(p)
+                                        for p in stream_state2[t, e].phase_list
+                                    )
                                 )
                             )
                         else:
@@ -465,10 +480,12 @@ class MSContactorScaler(CustomScalerBase):
                 heat_var = getattr(model, stream + "_heat")
                 for t in model.flowsheet().time:
                     for e in model.elements:
-                        nom = self.get_expression_nominal_value(
-                            sum(
-                                stream_state[t, e].get_enthalpy_flow_terms(p)
-                                for p in stream_state[t, e].phase_list
+                        nom = abs(
+                            self.get_expression_nominal_value(
+                                sum(
+                                    stream_state[t, e].get_enthalpy_flow_terms(p)
+                                    for p in stream_state[t, e].phase_list
+                                )
                             )
                         )
                         self.set_variable_scaling_factor(
@@ -623,11 +640,13 @@ class MSContactorScaler(CustomScalerBase):
             if hasattr(model, stream + "_material_balance"):
                 mbal = getattr(model, stream + "_material_balance")
                 for t, e, comp in mbal:
-                    nom = self.get_expression_nominal_value(
-                        sum(
-                            stream_state[t, e].get_material_flow_terms(p, comp)
-                            for p in stream_state[t, e].phase_list
-                            if (p, comp) in stream_state[t, e].phase_component_set
+                    nom = abs(
+                        self.get_expression_nominal_value(
+                            sum(
+                                stream_state[t, e].get_material_flow_terms(p, comp)
+                                for p in stream_state[t, e].phase_list
+                                if (p, comp) in stream_state[t, e].phase_component_set
+                            )
                         )
                     )
                     self.set_component_scaling_factor(
@@ -639,10 +658,12 @@ class MSContactorScaler(CustomScalerBase):
             if hasattr(model, stream + "_energy_balance"):
                 ebal = getattr(model, stream + "_energy_balance")
                 for t, e in ebal:
-                    nom = self.get_expression_nominal_value(
-                        sum(
-                            stream_state[t, e].get_enthalpy_flow_terms(p)
-                            for p in stream_state[t, e].phase_list
+                    nom = abs(
+                        self.get_expression_nominal_value(
+                            sum(
+                                stream_state[t, e].get_enthalpy_flow_terms(p)
+                                for p in stream_state[t, e].phase_list
+                            )
                         )
                     )
                     self.set_component_scaling_factor(
@@ -1175,19 +1196,19 @@ class MSContactorData(UnitModelBlockData):
         rpack = self.config.heterogeneous_reactions
         rpack_args = self.config.heterogeneous_reactions_args
 
-        try:
-            self.heterogeneous_reactions = rpack.build_reaction_block(
-                self.flowsheet().time,
-                self.elements,
-                doc="Heterogeneous reaction block for contactor.",
-                **rpack_args,
-            )
-        except AttributeError:
+        if not hasattr(rpack, "build_reaction_block"):
             raise ConfigurationError(
                 "Heterogeneous reaction package has not implemented a "
                 "build_reaction_block method. Please ensure that your "
                 "reaction block conforms to the required standards."
             )
+
+        self.heterogeneous_reactions = rpack.build_reaction_block(
+            self.flowsheet().time,
+            self.elements,
+            doc="Heterogeneous reaction block for contactor.",
+            **rpack_args,
+        )
 
         if not hasattr(self.config.heterogeneous_reactions, "reaction_idx"):
             raise PropertyNotSupportedError(
@@ -1908,22 +1929,22 @@ def _material_balance_rule(blk, t, s, j, stream, mb_units):
 
 
 def _get_energy_transfer_term(blk, uom):
-    try:
+    if hasattr(blk, "energy_transfer_term"):
         return blk.energy_transfer_term
-    except AttributeError:
-        # Assume that if energy balances are enabled that energy transfer
-        # occurs between all interacting phases.
-        # For now, we will not distinguish different types of energy transfer.
-        # Convention is that a positive energy flow term indicates flow into
-        # the first stream from the second stream.
-        blk.energy_transfer_term = Var(
-            blk.flowsheet().time,
-            blk.elements,
-            blk.stream_interactions,
-            initialize=0,
-            units=uom.POWER,
-            doc="Inter-stream energy transfer term",
-        )
+
+    # Assume that if energy balances are enabled that energy transfer
+    # occurs between all interacting phases.
+    # For now, we will not distinguish different types of energy transfer.
+    # Convention is that a positive energy flow term indicates flow into
+    # the first stream from the second stream.
+    blk.energy_transfer_term = Var(
+        blk.flowsheet().time,
+        blk.elements,
+        blk.stream_interactions,
+        initialize=0,
+        units=uom.POWER,
+        doc="Inter-stream energy transfer term",
+    )
 
     return blk.energy_transfer_term
 
